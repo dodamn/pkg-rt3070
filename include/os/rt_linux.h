@@ -96,7 +96,7 @@
 #ifdef CONFIG_STA_SUPPORT
 
 #ifdef RTMP_MAC_USB
-#define STA_PROFILE_PATH			"/etc/Wireless/RT2870STA/RT2870STA.dat"
+#define STA_PROFILE_PATH			"/etc/Wireless/RT3070STA/RT3070STA.dat"
 #define STA_DRIVER_VERSION			"2.1.1.0"
 #ifdef MULTIPLE_CARD_SUPPORT
 #define CARD_INFO_PATH			"/etc/Wireless/RT2870STA/RT2870STACard.dat"
