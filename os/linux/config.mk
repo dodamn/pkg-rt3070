@@ -6,12 +6,12 @@ HAS_28xx_QA=n
 
 #ifdef WPA_SUPPLICANT_SUPPORT
 # Support Wpa_Supplicant
-HAS_WPA_SUPPLICANT=n
+HAS_WPA_SUPPLICANT=y
 #endif // WPA_SUPPLICANT_SUPPORT //
 
 #ifdef NATIVE_WPA_SUPPLICANT_SUPPORT
 # Support Native WpaSupplicant for Network Maganger
-HAS_NATIVE_WPA_SUPPLICANT_SUPPORT=n
+HAS_NATIVE_WPA_SUPPLICANT_SUPPORT=y
 #endif // NATIVE_WPA_SUPPLICANT_SUPPORT //
 
 #Support Net interface block while Tx-Sw queue full
