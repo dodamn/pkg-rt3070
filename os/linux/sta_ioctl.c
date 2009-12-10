@@ -1036,7 +1036,7 @@ int rt_ioctl_iwaplist(struct net_device *dev,
 	return 0;
 }
 
-#ifdef SIOCGIWSCAN
+#if defined(SIOCGIWSCAN) || defined(RT_CFG80211_SUPPORT)
 int rt_ioctl_siwscan(struct net_device *dev,
 			struct iw_request_info *info,
 			struct iw_point *data, char *extra)

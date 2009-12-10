@@ -981,6 +981,7 @@ typedef struct _CHANNEL_TX_POWER {
 	CHAR       Power2;
 	UCHAR      MaxTxPwr;
 	UCHAR      DfsReq;
+	UCHAR	   RegulatoryDomain;
 } CHANNEL_TX_POWER, *PCHANNEL_TX_POWER;
 
 // structure to store 802.11j channel TX power
@@ -1758,6 +1759,8 @@ typedef struct _COMMON_CONFIG {
 #endif
 
 	BOOLEAN		HT_DisallowTKIP;		/* Restrict the encryption type in 11n HT mode */
+
+       BOOLEAN		HT_Disable; /* 1: disable HT function; 0: enable HT function */
 } COMMON_CONFIG, *PCOMMON_CONFIG;
 
 
@@ -2700,6 +2703,20 @@ struct _RTMP_ADAPTER
 
 #ifdef CONFIG_STA_SUPPORT
 #endif // CONFIG_STA_SUPPORT //
+
+#define RFIC_24GHZ		0x01
+#define RFIC_5GHZ		0x02
+	UINT8	RFICType;
+
+#ifdef LINUX
+#ifdef RT_CFG80211_SUPPORT
+	VOID *pCfgDev;
+	VOID *pCfg80211_CB;
+
+	BOOLEAN FlgCfg80211Scanning;
+	UCHAR Cfg80211_Alpha2[2];
+#endif // RT_CFG80211_SUPPORT //
+#endif // LINUX //
 
 };
 
@@ -6772,6 +6789,12 @@ NDIS_STATUS RTUSBQueryHardWareRegister(
 VOID CMDHandler(                                                                                                                                                
     IN PRTMP_ADAPTER pAd);
 
+NDIS_STATUS RTEnqueueInternalCmd(
+	IN PRTMP_ADAPTER	pAd,
+	IN NDIS_OID			Oid,
+	IN PVOID			pInformationBuffer,
+	IN UINT32			InformationBufferLength);
+
 NDIS_STATUS	RTUSBWriteHWMACAddress(
 	IN	PRTMP_ADAPTER		pAdapter);
 
@@ -7117,6 +7140,15 @@ void RtmpOSFSInfoChange(
 	IN RTMP_OS_FS_INFO *pOSFSInfo, 
 	IN BOOLEAN bSet);
 
+
+// command
+INT Set_SSID_Proc(
+    IN  PRTMP_ADAPTER   pAdapter, 
+    IN  PSTRING          arg);
+
+INT Set_NetworkType_Proc(
+    IN  PRTMP_ADAPTER   pAdapter, 
+    IN  PSTRING          arg);
 
 #endif  // __RTMP_H__
 

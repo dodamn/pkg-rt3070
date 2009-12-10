@@ -73,6 +73,19 @@
 #include <linux/kthread.h>
 #endif // KTHREAD_SUPPORT //
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
+#include <linux/pid.h>
+#endif
+
+#ifdef RT_CFG80211_SUPPORT
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,28))
+#include <net/mac80211.h>
+#define EXT_BUILD_CHANNEL_LIST	/* must define with CRDA */
+#else // LINUX_VERSION_CODE //
+#undef RT_CFG80211_SUPPORT
+#endif // LINUX_VERSION_CODE //
+#endif // RT_CFG80211_SUPPORT //
+
 #undef AP_WSC_INCLUDED
 #undef STA_WSC_INCLUDED
 #undef WSC_INCLUDED
@@ -97,7 +110,7 @@
 
 #ifdef RTMP_MAC_USB
 #define STA_PROFILE_PATH			"/etc/Wireless/RT3070STA/RT3070STA.dat"
-#define STA_DRIVER_VERSION			"2.1.1.0"
+#define STA_DRIVER_VERSION			"2.1.2.0"
 #ifdef MULTIPLE_CARD_SUPPORT
 #define CARD_INFO_PATH			"/etc/Wireless/RT2870STA/RT2870STACard.dat"
 #endif // MULTIPLE_CARD_SUPPORT //

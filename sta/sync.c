@@ -646,6 +646,12 @@ VOID PeerBeaconAtScanAction(
 			NdisMoveMemory(&pAd->ScanTab.BssEntry[Idx].TTSF[4], &Elem->TimeStamp.u.LowPart, 4);
 		}
 
+#ifdef LINUX
+#ifdef RT_CFG80211_SUPPORT
+		RT_CFG80211_SCANNING_INFORM(pAd, Idx, Elem->Channel, pFrame,
+									Elem->MsgLen, Rssi, MEM_ALLOC_FLAG);
+#endif // RT_CFG80211_SUPPORT //
+#endif // LINUX //
 	}
 	// sanity check fail, ignored
 }

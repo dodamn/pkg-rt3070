@@ -266,6 +266,10 @@ int rt28xx_close(IN PNET_DEV dev)
 
 	DBGPRINT(RT_DEBUG_TRACE, ("===> rt28xx_close\n"));
 
+#ifdef RT_CFG80211_SUPPORT
+	CFG80211_UnRegister(pAd, net_dev);
+#endif // RT_CFG80211_SUPPORT //
+
 	Cancelled = FALSE;
 	// Sanity check for pAd
 	if (pAd == NULL)
@@ -461,6 +465,11 @@ int rt28xx_open(IN PNET_DEV dev)
 	// Chip & other init
 	if (rt28xx_init(pAd, mac, hostname) == FALSE)
 		goto err;
+
+#ifdef RT_CFG80211_SUPPORT
+	CFG80211_Register(pAd, pAd->pCfgDev, net_dev);
+	RT_CFG80211_CRDA_REG_RULE_APPLY(pAd);
+#endif // RT_CFG80211_SUPPORT //
 
 #ifdef CONFIG_STA_SUPPORT
 #endif // CONFIG_STA_SUPPORT //

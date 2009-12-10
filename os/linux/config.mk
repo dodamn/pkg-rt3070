@@ -63,6 +63,9 @@ HAS_KTHREAD_SUPPORT=n
 #Support for Auto channel select enhance
 HAS_AUTO_CH_SELECT_ENHANCE=n
 
+#Support MAC80211 LINUX-only function
+HAS_CFG80211_SUPPORT=n
+
 #################################################
 
 CC := $(CROSS_COMPILE)gcc
@@ -116,6 +119,10 @@ endif
 
 ifeq ($(HAS_CS_SUPPORT),y)
 WFLAGS += -DCARRIER_DETECTION_SUPPORT
+endif
+
+ifeq ($(HAS_CFG80211_SUPPORT),y)
+WFLAGS += -DRT_CFG80211_SUPPORT
 endif
 
 endif

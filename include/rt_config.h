@@ -53,6 +53,7 @@
 #include "crypt_md5.h"
 #include "crypt_sha2.h"
 #include "crypt_hmac.h"
+#include "rtmp_cmd.h"
 #include "rtmp.h"
 #include "ap.h"
 #include "dfs.h"
@@ -112,6 +113,9 @@
 #endif // IKANOS_VX_1X0 //
 
 
+#ifdef RT_CFG80211_SUPPORT
+#include "cfg80211.h"
+#endif // RT_CFG80211_SUPPORT //
 
 #endif	// __RT_CONFIG_H__
 

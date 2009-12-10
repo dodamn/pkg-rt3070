@@ -976,6 +976,10 @@ static int __devinit rt2870_probe(
 	init_waitqueue_head(&pAd->cmdQTask.kthread_q);
 #endif	
 
+#ifdef RT_CFG80211_SUPPORT
+	pAd->pCfgDev = &(usb_dev->dev);
+#endif // RT_CFG80211_SUPPORT //
+
 	*ppAd = pAd;
 
 	DBGPRINT(RT_DEBUG_TRACE, ("<===rt2870_probe()!\n"));
