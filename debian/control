@@ -1,0 +1,20 @@
+Source: rt3070
+Section: misc
+Priority: optional
+Maintainer: dodamn <dodamn@gmail.com>
+Build-Depends: cdbs, debhelper (>= 7), patchutils, dpatch
+Standards-Version: 3.8.0
+Homepage: http://www.ralinktech.com/
+
+Package: rt3070
+Architecture: all
+Depends: ${shlibs:Depends}, ${misc:Depends}, dkms, linux-headers-generic
+Description: Ralink Tech. RT3070USB(RT307X) wireless lan Linux driver
+ This package contains Ralink's own GPLed Linux driver to support
+ any wireless lan device using the RT3070 chipset.
+ .
+ This package uses DKMS to build the driver from source. The kernel module
+ will be built for your current kernel and will be automatically re-built
+ itself when you update your kernel.
+ .
+

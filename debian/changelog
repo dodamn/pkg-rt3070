@@ -1,0 +1,15 @@
+rt3070 (2.1.1.0-1~ppa1~jaunty1) jaunty; urgency=low
+
+  * Initial release
+  
+  * Adjust the Makefile
+    - Not to build target 'build_tools' when target 'all' is builded
+    - Not to copy the module into /tftpboot after the module is builded
+  
+  * Adjust the config.mk
+    - Support wpa-supplicant
+    - Support native wpa-supplicant for network manager
+    
+  * Change profile name from RT2870STA.dat to RT3070STA.dat    
+
+ -- dodamn <dodamn@gmail.com>  Thu, 10 Dec 2009 17:07:24 +0900
