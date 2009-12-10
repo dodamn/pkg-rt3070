@@ -130,7 +130,7 @@ endif
 
 export RT28xx_DIR RT28xx_MODE LINUX_SRC CROSS_COMPILE CROSS_COMPILE_INCLUDE PLATFORM RELEASE CHIPSET RTMP_SRC_DIR LINUX_SRC_MODULE TARGET
 
-all: build_tools $(TARGET)
+all: $(TARGET)
 
 
 build_tools:
@@ -149,11 +149,9 @@ LINUX:
 ifneq (,$(findstring 2.4,$(LINUX_SRC)))
 	cp -f os/linux/Makefile.4 $(RT28xx_DIR)/os/linux/Makefile
 	make -C $(RT28xx_DIR)/os/linux/
-	cp -f $(RT28xx_DIR)/os/linux/rt$(CHIPSET)sta.o /tftpboot
 else
 	cp -f os/linux/Makefile.6 $(RT28xx_DIR)/os/linux/Makefile
 	make  -C  $(LINUX_SRC) SUBDIRS=$(RT28xx_DIR)/os/linux modules
-	cp -f $(RT28xx_DIR)/os/linux/rt$(CHIPSET)sta.ko /tftpboot
 endif	
 
 clean:
