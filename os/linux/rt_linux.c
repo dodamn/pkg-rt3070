@@ -1495,6 +1495,40 @@ void RtmpOSNetDevDetach(PNET_DEV pNetDev)
 }
 
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,18)
+static void RALINK_ET_DrvInfoGet(
+	IN struct net_device *pDev,
+	IN struct ethtool_drvinfo *pInfo)
+{
+	strcpy(pInfo->driver, "RALINK WLAN");
+
+#ifdef CONFIG_STA_SUPPORT
+	strcpy(pInfo->version, STA_DRIVER_VERSION);
+#endif // CONFIG_STA_SUPPORT //
+
+	sprintf(pInfo->bus_info, "CSR 0x%lx", pDev->base_addr);
+}
+
+static struct ethtool_ops RALINK_Ethtool_Ops = {
+	.get_drvinfo		= RALINK_ET_DrvInfoGet,
+};
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,31)
+static struct net_device_ops RALINK_Netdev_Ops = {
+         .ndo_open               = NULL,
+         .ndo_stop               = NULL,
+         .ndo_start_xmit         = NULL,
+         .ndo_get_stats          = NULL,
+         .ndo_set_multicast_list = NULL,
+         .ndo_do_ioctl           = NULL,
+         .ndo_tx_timeout         = NULL,
+         .ndo_change_mtu         = NULL,
+         .ndo_set_mac_address    = NULL,
+         .ndo_validate_addr      = NULL,
+ };
+#endif
+#endif
+
 int RtmpOSNetDevAttach(
 	IN PNET_DEV pNetDev, 
 	IN RTMP_OS_NETDEV_OP_HOOK *pDevOpHook)
@@ -1507,16 +1541,31 @@ int RtmpOSNetDevAttach(
 	{
 		PRTMP_ADAPTER pAd = RTMP_OS_NETDEV_GET_PRIV(pNetDev);
 	
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,31)
+		RALINK_Netdev_Ops.ndo_open			= pDevOpHook->open;
+		RALINK_Netdev_Ops.ndo_stop			= pDevOpHook->stop;
+		RALINK_Netdev_Ops.ndo_start_xmit	= (HARD_START_XMIT_FUNC)(pDevOpHook->xmit);
+		RALINK_Netdev_Ops.ndo_do_ioctl		= pDevOpHook->ioctl;
+#else
 		pNetDev->open			= pDevOpHook->open;
 		pNetDev->stop			= pDevOpHook->stop;
 		pNetDev->hard_start_xmit	= (HARD_START_XMIT_FUNC)(pDevOpHook->xmit);
 		pNetDev->do_ioctl		= pDevOpHook->ioctl;
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,18)
+		pNetDev->ethtool_ops = &RALINK_Ethtool_Ops;
+#endif
 		
 		/* if you don't implement get_stats, just leave the callback function as NULL, a dummy 
 		     function will make kernel panic.
 		*/
 		if (pDevOpHook->get_stats)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,31)
+			RALINK_Netdev_Ops.ndo_get_stats = pDevOpHook->get_stats;
+#else
 			pNetDev->get_stats = pDevOpHook->get_stats;
+#endif
 
 		/* OS specific flags, here we used to indicate if we are virtual interface */
 		pNetDev->priv_flags = pDevOpHook->priv_flags; 
@@ -1550,7 +1599,12 @@ int RtmpOSNetDevAttach(
 	}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,31)
+	RALINK_Netdev_Ops.ndo_validate_addr = NULL;
+	pNetDev->netdev_ops = &RALINK_Netdev_Ops;
+#else
 	pNetDev->validate_addr = NULL;
+#endif
 #endif
 
 	if (rtnl_locked)

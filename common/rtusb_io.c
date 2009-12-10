@@ -1756,8 +1756,29 @@ VOID CMDHandler(
 						AsicForceWakeup(pAd, TRUE);
 					break;
 #endif // CONFIG_STA_SUPPORT //
+#ifdef LINUX
+#ifdef RT_CFG80211_SUPPORT
+				case CMDTHREAD_REG_HINT:
+					CFG80211_RegHint(pAd, pData, cmdqelmt->bufferlength);
+					break;
+#endif // RT_CFG80211_SUPPORT //
+#endif // LINUX //
 
+#ifdef LINUX
+#ifdef RT_CFG80211_SUPPORT
+				case CMDTHREAD_REG_HINT_11D:
+					CFG80211_RegHint11D(pAd, pData, cmdqelmt->bufferlength);
+					break;
+#endif // RT_CFG80211_SUPPORT //
+#endif // LINUX //
 
+#ifdef LINUX
+#ifdef RT_CFG80211_SUPPORT
+				case CMDTHREAD_SCAN_END:
+					CFG80211_ScanEnd(pAd, FALSE);
+					break;
+#endif // RT_CFG80211_SUPPORT //
+#endif // LINUX //
 				default:
 					DBGPRINT(RT_DEBUG_ERROR, ("--> Control Thread !! ERROR !! Unknown(cmdqelmt->command=0x%x) !! \n", cmdqelmt->command));
 					break;                                                                                                                                              

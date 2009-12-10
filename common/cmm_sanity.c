@@ -776,7 +776,7 @@ BOOLEAN PeerBeaconAndProbeRspSanity(
                 }
                 break;
 #ifdef CONFIG_STA_SUPPORT
-#ifdef EXT_BUILD_CHANNEL_LIST
+#if defined (EXT_BUILD_CHANNEL_LIST) || defined (RT_CFG80211_SUPPORT)
 			case IE_COUNTRY:				
 				Ptr = (PUCHAR) pVIE;
                 NdisMoveMemory(Ptr + *LengthVIE, &pEid->Eid, pEid->Len + 2);

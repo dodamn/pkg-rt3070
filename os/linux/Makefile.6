@@ -30,6 +30,7 @@ rt$(CHIPSET)sta-objs := \
 	../../common/rt_channel.o\
 	../../common/cmm_profile.o\
 	../../common/cmm_asic.o\
+	../../common/cmm_cmd.o\
 	../../sta/assoc.o\
 	../../sta/auth.o\
 	../../sta/auth_rsp.o\
@@ -136,6 +137,11 @@ endif
 
 ifeq ($(HAS_ATE),y)
 rt$(CHIPSET)sta-objs += ../../os/linux/rt_ate.o
+endif
+
+ifeq ($(HAS_CFG80211_SUPPORT),y)
+rt$(CHIPSET)sta-objs += \
+	../../os/linux/cfg80211.o
 endif
 
 #endif // CONFIG_STA_SUPPORT //

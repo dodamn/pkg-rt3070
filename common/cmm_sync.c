@@ -475,6 +475,14 @@ VOID ScanNextChannel(
 			pAd->Mlme.SyncMachine.CurrState = SYNC_IDLE;
 			Status = MLME_SUCCESS;
 			MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_SCAN_CONF, 2, &Status);
+
+				RTMPSendWirelessEvent(pAd, IW_SCAN_COMPLETED_EVENT_FLAG, NULL, BSS0, 0);
+
+#ifdef LINUX
+#ifdef RT_CFG80211_SUPPORT
+			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_SCAN_END, NULL, 0);
+#endif // RT_CFG80211_SUPPORT //
+#endif // LINUX //
 		}
 #endif // CONFIG_STA_SUPPORT //
 
