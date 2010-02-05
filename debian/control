@@ -8,7 +8,7 @@ Homepage: http://www.ralinktech.com/
 
 Package: rt3070
 Architecture: all
-Depends: ${shlibs:Depends}, ${misc:Depends}, dkms, linux-headers-generic
+Depends: ${shlibs:Depends}, ${misc:Depends}, dkms, linux-headers-generic, sed
 Description: Ralink Tech. RT3070USB(RT307X) wireless lan Linux driver
  This package contains Ralink's own GPLed Linux driver to support
  any wireless lan device using the RT3070 chipset.

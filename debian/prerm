@@ -21,6 +21,9 @@ CVERSION=`dpkg-query -W -f='${Version}' rt3070 | awk -F "-" '{print $1}' | cut -
 case "$1" in
     remove|upgrade|deconfigure)
         echo "Removing all DKMS modules"
+        MODULES_ORDER="/lib/modules/`uname -r`/modules.order"
+        TMP_FILE=`mktemp`
+        sed -e '/^updates\/dkms\/rt3070sta.ko$/d' $MODULES_ORDER > $TMP_FILE && mv $TMP_FILE $MODULES_ORDER
     	dkms remove -m rt3070 -v $CVERSION --all > /dev/null
 
     	echo "Done"

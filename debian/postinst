@@ -28,6 +28,9 @@ case "$1" in
     	dkms build -m rt3070 -v $CVERSION > /dev/null
 
     	echo "Installing initial module"
+        MODULES_ORDER="/lib/modules/`uname -r`/modules.order"
+        TMP_FILE=`mktemp`
+        echo 'updates/dkms/rt3070sta.ko' | cat - $MODULES_ORDER > $TMP_FILE && mv $TMP_FILE $MODULES_ORDER
     	dkms install -m rt3070 -v $CVERSION --force > /dev/null
 
     	echo "Done"
