@@ -1,3 +1,10 @@
+rt3070 (2.1.2.0-0ubuntu1~ppa1~karmic1) karmic; urgency=low
+
+  * Set this module to the first order for loading
+    - This module is placed on the first line in modules.order
+
+ -- dodamn <dodamn@gmail.com>  Sat, 06 Feb 2010 05:21:57 +0900
+
 rt3070 (2.1.2.0-1~ppa3~jaunty1) jaunty; urgency=low
 
   * Fix old version in debian/install
