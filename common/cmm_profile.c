@@ -23,15 +23,6 @@
  * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             * 
  *                                                                       * 
  *************************************************************************
-
-    Module Name:
-	cmm_profile.c
- 
-    Abstract:
- 
-    Revision History:
-    Who          When          What
-    ---------    ----------    ----------------------------------------------
  */
  
 #include "rt_config.h"
@@ -424,6 +415,7 @@ INT RTMPGetKeyParameter(
 
 	NdisMoveMemory(temp_buf2, start_ptr, end_ptr-start_ptr);
 	temp_buf2[end_ptr-start_ptr]='\0';
+
 	if((start_ptr=rtstrstr(temp_buf2, "=")) == NULL)
 	{
 		os_free_mem(NULL, (PUCHAR)pMemBuf);
@@ -758,6 +750,35 @@ static void rtmp_read_sta_wmm_parms_from_file(IN  PRTMP_ADAPTER pAd, char *tmpbu
 	}
 
 }
+
+#ifdef XLINK_SUPPORT
+static void rtmp_get_psp_xlink_mode_from_file(IN  PRTMP_ADAPTER pAd, char *tmpbuf, char *buffer)
+{
+	UINT32 Value = 0;
+
+	// Xlink Mode
+	if (RTMPGetKeyParameter("PSP_XLINK_MODE", tmpbuf, 32, buffer, TRUE))
+	{
+		if(simple_strtol(tmpbuf, 0, 10) != 0) // enable
+		{
+			pAd->StaCfg.PSPXlink = TRUE;
+		}
+		else // disable
+		{
+			pAd->StaCfg.PSPXlink = FALSE;
+		}
+
+		if (pAd->StaCfg.PSPXlink)
+			Value = PSPXLINK;
+		else
+			Value = STANORMAL;
+
+		RTMP_IO_WRITE32(pAd, RX_FILTR_CFG, Value);
+
+		DBGPRINT(RT_DEBUG_TRACE, ("PSP_XLINK_MODE=%d\n", pAd->StaCfg.PSPXlink));
+	}
+}
+#endif // XLINK_SUPPORT //
 #endif // CONFIG_STA_SUPPORT //
 
 
@@ -767,7 +788,6 @@ static void HTParametersHook(
 	IN	PSTRING		  pValueStr,
 	IN	PSTRING		  pInput)
 {
-
 	long Value;
 
     if (RTMPGetKeyParameter("HT_PROTECT", pValueStr, 25, pInput, TRUE))
@@ -782,20 +802,6 @@ static void HTParametersHook(
             pAd->CommonCfg.bHTProtect = TRUE;
         }
         DBGPRINT(RT_DEBUG_TRACE, ("HT: Protection  = %s\n", (Value==0) ? "Disable" : "Enable"));
-    }
-
-    if (RTMPGetKeyParameter("HT_MIMOPSEnable", pValueStr, 25, pInput, TRUE))
-    {
-        Value = simple_strtol(pValueStr, 0, 10);
-        if (Value == 0)
-        {
-            pAd->CommonCfg.bMIMOPSEnable = FALSE;
-        }
-        else
-        {
-            pAd->CommonCfg.bMIMOPSEnable = TRUE;
-        }
-        DBGPRINT(RT_DEBUG_TRACE, ("HT: MIMOPSEnable  = %s\n", (Value==0) ? "Disable" : "Enable"));
     }
 
 
@@ -830,20 +836,6 @@ static void HTParametersHook(
     }
 
 
-    if (RTMPGetKeyParameter("HT_DisableReordering", pValueStr, 25, pInput, TRUE))
-    {
-        Value = simple_strtol(pValueStr, 0, 10);
-        if (Value == 0)
-        {
-            pAd->CommonCfg.bDisableReordering = FALSE;
-        }
-        else
-        {
-            pAd->CommonCfg.bDisableReordering = TRUE;
-        }
-        DBGPRINT(RT_DEBUG_TRACE, ("HT: DisableReordering  = %s\n", (Value==0) ? "Disable" : "Enable"));
-    }
-
     if (RTMPGetKeyParameter("HT_AutoBA", pValueStr, 25, pInput, TRUE))
     {
         Value = simple_strtol(pValueStr, 0, 10);
@@ -858,6 +850,7 @@ static void HTParametersHook(
 			pAd->CommonCfg.BACapability.field.Policy = IMMED_BA;
         }
         pAd->CommonCfg.REGBACapability.field.AutoBA = pAd->CommonCfg.BACapability.field.AutoBA;
+		pAd->CommonCfg.REGBACapability.field.Policy = pAd->CommonCfg.BACapability.field.Policy;
         DBGPRINT(RT_DEBUG_TRACE, ("HT: Auto BA  = %s\n", (Value==0) ? "Disable" : "Enable"));
     }
 
@@ -876,21 +869,6 @@ static void HTParametersHook(
 		DBGPRINT(RT_DEBUG_TRACE, ("HT: Tx +HTC frame = %s\n", (Value==0) ? "Disable" : "Enable"));
 	}
 
-	// Enable HT Link Adaptation Control
-	if (RTMPGetKeyParameter("HT_LinkAdapt", pValueStr, 25, pInput, TRUE))
-	{
-		Value = simple_strtol(pValueStr, 0, 10);
-		if (Value == 0)
-		{
-			pAd->bLinkAdapt = FALSE;
-		}
-		else
-		{
-			pAd->HTCEnable = TRUE;
-			pAd->bLinkAdapt = TRUE;
-		}
-		DBGPRINT(RT_DEBUG_TRACE, ("HT: Link Adaptation Control = %s\n", (Value==0) ? "Disable" : "Enable(+HTC)"));
-	}
 
 	// Reverse Direction Mechanism
     if (RTMPGetKeyParameter("HT_RDG", pValueStr, 25, pInput, TRUE))
@@ -1000,40 +978,13 @@ static void HTParametersHook(
 	// Fixed Tx mode : CCK, OFDM
 	if (RTMPGetKeyParameter("FixedTxMode", pValueStr, 25, pInput, TRUE))
 	{
-		UCHAR	fix_tx_mode;
-	
 #ifdef CONFIG_STA_SUPPORT
 		IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
 		{
-			fix_tx_mode = FIXED_TXMODE_HT;
-
-			if (strcmp(pValueStr, "OFDM") == 0 || strcmp(pValueStr, "ofdm") == 0)
-			{
-				fix_tx_mode = FIXED_TXMODE_OFDM;
-			}	
-			else if (strcmp(pValueStr, "CCK") == 0 || strcmp(pValueStr, "cck") == 0)
-			{
-		        fix_tx_mode = FIXED_TXMODE_CCK;
-			}
-			else if (strcmp(pValueStr, "HT") == 0 || strcmp(pValueStr, "ht") == 0)
-			{
-		        fix_tx_mode = FIXED_TXMODE_HT;
-		}	
-		else 
-		{
-				Value = simple_strtol(pValueStr, 0, 10);
-				// 1 : CCK
-				// 2 : OFDM
-				// otherwise : HT
-				if (Value == FIXED_TXMODE_CCK || Value == FIXED_TXMODE_OFDM)
-					fix_tx_mode = Value;	
-				else
-					fix_tx_mode = FIXED_TXMODE_HT;
-		}
-
-			pAd->StaCfg.DesiredTransmitSetting.field.FixedTxMode = fix_tx_mode;
-			DBGPRINT(RT_DEBUG_TRACE, ("Fixed Tx Mode = %d\n", fix_tx_mode));
-			
+			pAd->StaCfg.DesiredTransmitSetting.field.FixedTxMode = 
+										RT_CfgSetFixedTxPhyMode(pValueStr);
+			DBGPRINT(RT_DEBUG_TRACE, ("Fixed Tx Mode = %d\n", 
+											pAd->StaCfg.DesiredTransmitSetting.field.FixedTxMode));			
 		}
 #endif // CONFIG_STA_SUPPORT //
 	}
@@ -1174,22 +1125,22 @@ static void HTParametersHook(
 		}
 		DBGPRINT(RT_DEBUG_TRACE, ("HT: Rx Stream = %d\n", pAd->CommonCfg.RxStream));
 	}
-	//2008/11/05: KH add to support Antenna power-saving of AP<--
+#ifdef GREENAP_SUPPORT
 	//Green AP
 	if(RTMPGetKeyParameter("GreenAP", pValueStr, 10, pInput, TRUE))
 	{
 		Value = simple_strtol(pValueStr, 0, 10);
 		if (Value == 0)
 		{		
-			pAd->CommonCfg.bGreenAPEnable = FALSE;
+			pAd->ApCfg.bGreenAPEnable = FALSE;
 		}
 		else
 		{
-			pAd->CommonCfg.bGreenAPEnable = TRUE;
+			pAd->ApCfg.bGreenAPEnable = TRUE;
 		}
-		DBGPRINT(RT_DEBUG_TRACE, ("HT: Green AP= %d\n", pAd->CommonCfg.bGreenAPEnable));
+		DBGPRINT(RT_DEBUG_TRACE, ("HT: Green AP= %d\n", pAd->ApCfg.bGreenAPEnable));
 	}
-
+#endif // GREENAP_SUPPORT //
 	// HT_DisallowTKIP
 	if (RTMPGetKeyParameter("HT_DisallowTKIP", pValueStr, 25, pInput, TRUE))
 	{
@@ -1207,6 +1158,101 @@ static void HTParametersHook(
 		DBGPRINT(RT_DEBUG_TRACE, ("HT: Disallow TKIP mode = %s\n", (pAd->CommonCfg.HT_DisallowTKIP == TRUE) ? "ON" : "OFF" ));
 	}
 
+#ifdef DOT11_N_SUPPORT
+#ifdef DOT11N_DRAFT3
+			if (RTMPGetKeyParameter("OBSSScanParam", pValueStr, 32, pInput, TRUE))
+			{	int ObssScanValue, idx;
+				PSTRING	macptr;	
+				for (idx = 0, macptr = rstrtok(pValueStr,";"); macptr; macptr = rstrtok(NULL,";"), idx++)
+				{
+					ObssScanValue = simple_strtol(macptr, 0, 10);
+					switch (idx)
+					{
+						case 0:
+							if (ObssScanValue < 5 || ObssScanValue > 1000)
+							{
+								DBGPRINT(RT_DEBUG_ERROR, ("Invalid OBSSScanParam for Dot11OBssScanPassiveDwell(%d), should in range 5~1000\n", ObssScanValue));
+							}
+							else
+							{
+								pAd->CommonCfg.Dot11OBssScanPassiveDwell = ObssScanValue;	// Unit : TU. 5~1000
+								DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11OBssScanPassiveDwell=%d\n", ObssScanValue));
+							}
+							break;
+						case 1:
+							if (ObssScanValue < 10 || ObssScanValue > 1000)
+							{
+								DBGPRINT(RT_DEBUG_ERROR, ("Invalid OBSSScanParam for Dot11OBssScanActiveDwell(%d), should in range 10~1000\n", ObssScanValue));
+							}
+							else
+							{
+								pAd->CommonCfg.Dot11OBssScanActiveDwell = ObssScanValue;	// Unit : TU. 10~1000
+								DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11OBssScanActiveDwell=%d\n", ObssScanValue));
+							}
+							break;
+						case 2:
+							pAd->CommonCfg.Dot11BssWidthTriggerScanInt = ObssScanValue;	// Unit : Second
+							DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11BssWidthTriggerScanInt=%d\n", ObssScanValue));
+							break;
+						case 3:
+							if (ObssScanValue < 200 || ObssScanValue > 10000)
+							{
+								DBGPRINT(RT_DEBUG_ERROR, ("Invalid OBSSScanParam for Dot11OBssScanPassiveTotalPerChannel(%d), should in range 200~10000\n", ObssScanValue));
+							}
+							else
+							{
+								pAd->CommonCfg.Dot11OBssScanPassiveTotalPerChannel = ObssScanValue;	// Unit : TU. 200~10000
+								DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11OBssScanPassiveTotalPerChannel=%d\n", ObssScanValue));
+							}
+							break;
+						case 4:
+							if (ObssScanValue < 20 || ObssScanValue > 10000)
+							{
+								DBGPRINT(RT_DEBUG_ERROR, ("Invalid OBSSScanParam for Dot11OBssScanActiveTotalPerChannel(%d), should in range 20~10000\n", ObssScanValue));
+							}
+							else
+							{
+								pAd->CommonCfg.Dot11OBssScanActiveTotalPerChannel = ObssScanValue;	// Unit : TU. 20~10000
+								DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11OBssScanActiveTotalPerChannel=%d\n", ObssScanValue));
+							}
+							break;
+						case 5:
+							pAd->CommonCfg.Dot11BssWidthChanTranDelayFactor = ObssScanValue;
+							DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11BssWidthChanTranDelayFactor=%d\n", ObssScanValue));
+							break;
+						case 6:
+							pAd->CommonCfg.Dot11OBssScanActivityThre = ObssScanValue;	// Unit : percentage
+							DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11BssWidthChanTranDelayFactor=%d\n", ObssScanValue));
+							break;
+					}			
+				}
+
+				if (idx != 7)
+				{
+					DBGPRINT(RT_DEBUG_ERROR, ("Wrong OBSSScanParamtetrs format in dat file!!!!! Use default value.\n"));
+
+					pAd->CommonCfg.Dot11OBssScanPassiveDwell = dot11OBSSScanPassiveDwell;	// Unit : TU. 5~1000
+					pAd->CommonCfg.Dot11OBssScanActiveDwell = dot11OBSSScanActiveDwell;	// Unit : TU. 10~1000
+					pAd->CommonCfg.Dot11BssWidthTriggerScanInt = dot11BSSWidthTriggerScanInterval;	// Unit : Second	
+					pAd->CommonCfg.Dot11OBssScanPassiveTotalPerChannel = dot11OBSSScanPassiveTotalPerChannel;	// Unit : TU. 200~10000
+					pAd->CommonCfg.Dot11OBssScanActiveTotalPerChannel = dot11OBSSScanActiveTotalPerChannel;	// Unit : TU. 20~10000
+					pAd->CommonCfg.Dot11BssWidthChanTranDelayFactor = dot11BSSWidthChannelTransactionDelayFactor;
+					pAd->CommonCfg.Dot11OBssScanActivityThre = dot11BSSScanActivityThreshold;	// Unit : percentage
+				}
+				pAd->CommonCfg.Dot11BssWidthChanTranDelay = (pAd->CommonCfg.Dot11BssWidthTriggerScanInt * pAd->CommonCfg.Dot11BssWidthChanTranDelayFactor);
+							DBGPRINT(RT_DEBUG_TRACE, ("OBSSScanParam for Dot11BssWidthChanTranDelay=%ld\n", pAd->CommonCfg.Dot11BssWidthChanTranDelay));
+			}
+
+			if (RTMPGetKeyParameter("HT_BSSCoexistence", pValueStr, 25, pInput, TRUE))
+			{
+				Value = simple_strtol(pValueStr, 0, 10);
+				pAd->CommonCfg.bBssCoexEnable = ((Value == 1) ? TRUE : FALSE);
+
+				DBGPRINT(RT_DEBUG_TRACE, ("HT: 20/40 BssCoexSupport = %s\n", (pAd->CommonCfg.bBssCoexEnable == TRUE) ? "ON" : "OFF" ));
+			}
+#endif // DOT11N_DRAFT3 //
+
+#endif // DOT11_N_SUPPORT //
 
 	//2008/11/05:KH add to support Antenna power-saving of AP-->
 }
@@ -1229,6 +1275,13 @@ NDIS_STATUS	RTMPSetProfileParameters(
 	do
 	{
 		// set file parameter to portcfg
+		if (RTMPGetKeyParameter("MacAddress", tmpbuf, 25, pBuffer, TRUE))
+		{					
+			retval = RT_CfgSetMacAddress(pAd, tmpbuf);
+			if (retval)
+				DBGPRINT(RT_DEBUG_TRACE, ("MacAddress = %02x:%02x:%02x:%02x:%02x:%02x\n", 
+											PRINT_MAC(pAd->CurrentAddress)));
+		}
 		//CountryRegion
 		if(RTMPGetKeyParameter("CountryRegion", tmpbuf, 25, pBuffer, TRUE))
 		{
@@ -1243,12 +1296,14 @@ NDIS_STATUS	RTMPSetProfileParameters(
 		}
 #ifdef RTMP_EFUSE_SUPPORT
 #ifdef RT30xx
+#ifdef RALINK_ATE
 		//EfuseBufferMode
 		if(RTMPGetKeyParameter("EfuseBufferMode", tmpbuf, 25, pBuffer, TRUE))
 		{
 			pAd->bEEPROMFile = (UCHAR) simple_strtol(tmpbuf, 0, 10);
 			DBGPRINT(RT_DEBUG_TRACE, ("EfuseBufferMode=%d\n", pAd->bUseEfuse));
 		}
+#endif // RALINK_ATE //
 #endif // RT30xx //
 #endif // RTMP_EFUSE_SUPPORT //
 		//CountryCode
@@ -1267,6 +1322,8 @@ NDIS_STATUS	RTMPSetProfileParameters(
 			}
 			DBGPRINT(RT_DEBUG_TRACE, ("CountryCode=%s\n", pAd->CommonCfg.CountryCode));
 		}
+
+#ifdef EXT_BUILD_CHANNEL_LIST
 		//ChannelGeography
 		if(RTMPGetKeyParameter("ChannelGeography", tmpbuf, 25, pBuffer, TRUE))
 		{
@@ -1290,6 +1347,8 @@ NDIS_STATUS	RTMPSetProfileParameters(
 			pAd->CommonCfg.Geography = BOTH;
 			pAd->CommonCfg.CountryCode[2] = ' ';
 		}
+#endif // EXT_BUILD_CHANNEL_LIST //
+
 
 
 #ifdef CONFIG_STA_SUPPORT
@@ -1300,9 +1359,12 @@ NDIS_STATUS	RTMPSetProfileParameters(
 			{
 				if (strlen(tmpbuf) <= 32)
 				{
-						pAd->CommonCfg.SsidLen = (UCHAR) strlen(tmpbuf);
+					pAd->CommonCfg.SsidLen = (UCHAR) strlen(tmpbuf);
 					NdisZeroMemory(pAd->CommonCfg.Ssid, NDIS_802_11_LENGTH_SSID);
 					NdisMoveMemory(pAd->CommonCfg.Ssid, tmpbuf, pAd->CommonCfg.SsidLen);
+					pAd->CommonCfg.LastSsidLen= pAd->CommonCfg.SsidLen;
+					NdisZeroMemory(pAd->CommonCfg.LastSsid, NDIS_802_11_LENGTH_SSID);
+					NdisMoveMemory(pAd->CommonCfg.LastSsid, tmpbuf, pAd->CommonCfg.LastSsidLen);
 					pAd->MlmeAux.AutoReconnectSsidLen = pAd->CommonCfg.SsidLen;
 					NdisZeroMemory(pAd->MlmeAux.AutoReconnectSsid, NDIS_802_11_LENGTH_SSID);
 					NdisMoveMemory(pAd->MlmeAux.AutoReconnectSsid, tmpbuf, pAd->MlmeAux.AutoReconnectSsidLen);
@@ -1353,9 +1415,18 @@ NDIS_STATUS	RTMPSetProfileParameters(
 		//BeaconPeriod
 		if(RTMPGetKeyParameter("BeaconPeriod", tmpbuf, 10, pBuffer, TRUE))
 		{
-			pAd->CommonCfg.BeaconPeriod = (USHORT) simple_strtol(tmpbuf, 0, 10);
+			USHORT bcn_val = (USHORT) simple_strtol(tmpbuf, 0, 10);
+
+			/* The acceptable is 20~1000 ms. Refer to WiFi test plan. */
+			if (bcn_val >= 20 && bcn_val <= 1000)	
+				pAd->CommonCfg.BeaconPeriod = bcn_val;
+			else
+				pAd->CommonCfg.BeaconPeriod = 100;	// Default value
+			
 			DBGPRINT(RT_DEBUG_TRACE, ("BeaconPeriod=%d\n", pAd->CommonCfg.BeaconPeriod));
 		}
+
+
 	    //TxPower
 		if(RTMPGetKeyParameter("TxPower", tmpbuf, 10, pBuffer, TRUE))
 		{
@@ -1369,6 +1440,9 @@ NDIS_STATUS	RTMPSetProfileParameters(
 		//BGProtection
 		if(RTMPGetKeyParameter("BGProtection", tmpbuf, 10, pBuffer, TRUE))
 		{
+	//#if 0	//#ifndef WIFI_TEST
+	//		pAd->CommonCfg.UseBGProtection = 2;// disable b/g protection for throughput test
+	//#else
 			switch (simple_strtol(tmpbuf, 0, 10))
 			{
 				case 1: //Always On
@@ -1382,25 +1456,10 @@ NDIS_STATUS	RTMPSetProfileParameters(
 					pAd->CommonCfg.UseBGProtection = 0;
 					break;
 			}
+	//#endif
 			DBGPRINT(RT_DEBUG_TRACE, ("BGProtection=%ld\n", pAd->CommonCfg.UseBGProtection));
 		}
-		//OLBCDetection
-		if(RTMPGetKeyParameter("DisableOLBC", tmpbuf, 10, pBuffer, TRUE))
-		{
-			switch (simple_strtol(tmpbuf, 0, 10))
-			{
-				case 1: //disable OLBC Detection
-					pAd->CommonCfg.DisableOLBCDetect = 1;
-					break;
-				case 0: //enable OLBC Detection
-					pAd->CommonCfg.DisableOLBCDetect = 0;
-					break;
-				default:
-					pAd->CommonCfg.DisableOLBCDetect= 0;
-					break;
-			}
-			DBGPRINT(RT_DEBUG_TRACE, ("OLBCDetection=%ld\n", pAd->CommonCfg.DisableOLBCDetect));
-		}
+
 		//TxPreamble
 		if(RTMPGetKeyParameter("TxPreamble", tmpbuf, 10, pBuffer, TRUE))
 		{
@@ -1487,7 +1546,12 @@ NDIS_STATUS	RTMPSetProfileParameters(
 
 #ifdef CONFIG_STA_SUPPORT
 		IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
+		{
 			rtmp_read_sta_wmm_parms_from_file(pAd, tmpbuf, pBuffer);
+#ifdef XLINK_SUPPORT
+			rtmp_get_psp_xlink_mode_from_file(pAd, tmpbuf, pBuffer);
+#endif // XLINK_SUPPORT //
+		}
 #endif // CONFIG_STA_SUPPORT //
 
 		//ShortSlot
@@ -1616,28 +1680,23 @@ NDIS_STATUS	RTMPSetProfileParameters(
 			pAd->CommonCfg.RadarDetect.DfsSessionTime = 13;
 		}
 
+#ifdef SYSTEM_LOG_SUPPORT
 		//WirelessEvent
 		if(RTMPGetKeyParameter("WirelessEvent", tmpbuf, 10, pBuffer, TRUE))
 		{				
 #if WIRELESS_EXT >= 15
 		    if(simple_strtol(tmpbuf, 0, 10) != 0)
-				pAd->CommonCfg.bWirelessEvent = simple_strtol(tmpbuf, 0, 10);
+				pAd->CommonCfg.bWirelessEvent = TRUE;
 			else
-				pAd->CommonCfg.bWirelessEvent = 0;	// disable
+				pAd->CommonCfg.bWirelessEvent = FALSE;	// disable
 #else
-			pAd->CommonCfg.bWirelessEvent = 0;	// disable
+			pAd->CommonCfg.bWirelessEvent = FALSE;	// disable
 #endif
 				DBGPRINT(RT_DEBUG_TRACE, ("WirelessEvent=%d\n", pAd->CommonCfg.bWirelessEvent));
 		}
-		if(RTMPGetKeyParameter("WiFiTest", tmpbuf, 10, pBuffer, TRUE))
-		{				
-		    if(simple_strtol(tmpbuf, 0, 10) != 0)
-				pAd->CommonCfg.bWiFiTest= simple_strtol(tmpbuf, 0, 10);
-			else
-				pAd->CommonCfg.bWiFiTest = 0;	// disable
+#endif // SYSTEM_LOG_SUPPORT //
 
-				DBGPRINT(RT_DEBUG_TRACE, ("WiFiTest=%d\n", pAd->CommonCfg.bWiFiTest));
-		}
+			
 		//AuthMode
 		if(RTMPGetKeyParameter("AuthMode", tmpbuf, 128, pBuffer, TRUE))
 		{
@@ -1665,7 +1724,7 @@ NDIS_STATUS	RTMPSetProfileParameters(
 
 	                        pAd->StaCfg.PortSecured = WPA_802_1X_PORT_NOT_SECURED;
 
-				DBGPRINT(RT_DEBUG_TRACE, ("%s::(EncrypType=%d)\n", __FUNCTION__, pAd->StaCfg.WepStatus));
+				DBGPRINT(RT_DEBUG_TRACE, ("%s::(AuthMode=%d)\n", __FUNCTION__, pAd->StaCfg.AuthMode));
 			}
 #endif // CONFIG_STA_SUPPORT //
 		}
@@ -1745,21 +1804,6 @@ NDIS_STATUS	RTMPSetProfileParameters(
 		rtmp_read_key_parms_from_file(pAd, tmpbuf, pBuffer);
 
 
-		//HSCounter
-		/*if(RTMPGetKeyParameter("HSCounter", tmpbuf, 10, pBuffer, TRUE))
-		{
-			switch (simple_strtol(tmpbuf, 0, 10))
-			{
-				case 1: //Enable
-					pAd->CommonCfg.bEnableHSCounter = TRUE;
-					break;
-				case 0: //Disable
-				default:
-					pAd->CommonCfg.bEnableHSCounter = FALSE;
-					break;
-			}
-			DBGPRINT(RT_DEBUG_TRACE, "HSCounter=%d\n", pAd->CommonCfg.bEnableHSCounter);
-		}*/
 
 #ifdef DOT11_N_SUPPORT
 		HTParametersHook(pAd, tmpbuf, pBuffer);
@@ -1807,7 +1851,6 @@ NDIS_STATUS	RTMPSetProfileParameters(
 					{
 						// do NOT turn on PSM bit here, wait until MlmeCheckForPsmChange()
 						// to exclude certain situations.
-						//	   MlmeSetPsmBit(pAd, PWR_SAVE);
 						OPSTATUS_SET_FLAG(pAd, fOP_STATUS_RECEIVE_DTIM);
 						if (pAd->StaCfg.bWindowsACCAMEnable == FALSE)
 							pAd->StaCfg.WindowsPowerMode = Ndis802_11PowerModeFast_PSP;
@@ -1819,7 +1862,6 @@ NDIS_STATUS	RTMPSetProfileParameters(
 					{
 						// do NOT turn on PSM bit here, wait until MlmeCheckForPsmChange()
 						// to exclude certain situations.
-						//	   MlmeSetPsmBit(pAd, PWR_SAVE);
 						OPSTATUS_SET_FLAG(pAd, fOP_STATUS_RECEIVE_DTIM);
 						if (pAd->StaCfg.bWindowsACCAMEnable == FALSE)
 							pAd->StaCfg.WindowsPowerMode = Ndis802_11PowerModeLegacy_PSP;
@@ -1861,6 +1903,9 @@ NDIS_STATUS	RTMPSetProfileParameters(
 				DBGPRINT(RT_DEBUG_TRACE, ("RoamThreshold=%d  dBm\n", pAd->StaCfg.dBmToRoam));
 			}
 
+
+                 
+
 			if(RTMPGetKeyParameter("TGnWifiTest", tmpbuf, 10, pBuffer, TRUE))
 			{				
 				if(simple_strtol(tmpbuf, 0, 10) == 0)
@@ -1880,6 +1925,15 @@ NDIS_STATUS	RTMPSetProfileParameters(
 				DBGPRINT(RT_DEBUG_TRACE, ("BeaconLostTime=%ld \n", pAd->StaCfg.BeaconLostTime));
 			}
 
+			// Auto Connet Setting if no SSID			
+			if (RTMPGetKeyParameter("AutoConnect", tmpbuf, 32, pBuffer, TRUE))
+			{
+				if (simple_strtol(tmpbuf, 0, 10) == 0)
+					pAd->StaCfg.bAutoConnectIfNoSSID = FALSE;
+				else
+					pAd->StaCfg.bAutoConnectIfNoSSID = TRUE;
+			}
+
 			
 		}
 #endif // CONFIG_STA_SUPPORT //
@@ -1887,26 +1941,26 @@ NDIS_STATUS	RTMPSetProfileParameters(
 
 
 #ifdef RT30xx
-#ifdef CONFIG_STA_SUPPORT
-#ifdef ANT_DIVERSITY_SUPPORT
-		IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
-		{
-			if(RTMPGetKeyParameter("AntDiversity", tmpbuf, 10, pBuffer, TRUE))
-			{
-				for (i = 0, macptr = rstrtok(tmpbuf,";"); macptr; macptr = rstrtok(NULL,";"), i++)
-				{
-					if(simple_strtol(macptr, 0, 10) != 0)  //Enable
-						pAd->CommonCfg.bRxAntDiversity = TRUE;
-					else //Disable
-						pAd->CommonCfg.bRxAntDiversity = FALSE;
-
-					DBGPRINT(RT_DEBUG_ERROR, ("AntDiversity=%d\n", pAd->CommonCfg.bRxAntDiversity));
-				}
-			}
-		}
-#endif // ANT_DIVERSITY_SUPPORT //
-#endif // CONFIG_STA_SUPPORT //
 #endif // RT30xx //
+
+
+#ifdef SINGLE_SKU
+		if(RTMPGetKeyParameter("AntGain", tmpbuf, 10, pBuffer, TRUE))
+		{
+			UCHAR AntGain = simple_strtol(tmpbuf, 0, 10);
+			pAd->CommonCfg.AntGain= AntGain;
+	
+			DBGPRINT(RT_DEBUG_TRACE, ("AntGain=%d\n", pAd->CommonCfg.AntGain));
+		}
+		if(RTMPGetKeyParameter("BandedgeDelta", tmpbuf, 10, pBuffer, TRUE))
+		{
+			UCHAR Bandedge = simple_strtol(tmpbuf, 0, 10);
+			pAd->CommonCfg.BandedgeDelta = Bandedge;
+
+			DBGPRINT(RT_DEBUG_TRACE, ("BandedgeDelta=%d\n", pAd->CommonCfg.BandedgeDelta));
+		}
+#endif // SINGLE_SKU //
+
 
 	}while(0);
 
@@ -2273,4 +2327,6 @@ free_resource:
 	return flg_match_ok;
 }
 #endif // MULTIPLE_CARD_SUPPORT //
+
+
 

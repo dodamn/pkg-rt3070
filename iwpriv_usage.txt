@@ -5,6 +5,93 @@ Before reading this document, make sure you already read README.
 
 -------------------------------------------------------------------------------------------------------
 USAGE:
+	iwpriv ra0 commands val
+
+NOTE:
+	Wireless Extension Private Handlers
+
+where
+[commands]              [val] 
+						{range}
+-----------------   	-------------------------------------------------
+wsc_conf_mode			{0, 1, 2}
+						::Set WPS conf mode
+						0: WPS Disabled
+						1: Enrollee
+						2: Registrar
+
+wsc_mode				{1, 2}
+						::PIN or PBC
+						1: PIN
+						2: PBC
+
+wsc_pin					{00000000 ~ 99999999}
+						::Set Enrollee's PIN Code
+
+wsc_ssid				{0~z, 1~32 ascii characters}
+						::Set WPS AP SSID
+
+wsc_start				NULL
+						::Trigger RT2860 STA driver to do WPS process
+
+wsc_stop				NULL
+						::Stop WPS process
+
+wsc_gen_pincode			NULL
+						::Generate new PIN code
+
+wsc_cred_count			{1 ~ 8}
+						::Set count of WPS credential
+
+wsc_cred_ssid			{"idx ssid_str"}
+						::Set SSID into credtentail[idx]
+						idx: 0 ~ 7
+						ssid_str: 0~z, 1~32 ascii characters
+
+wsc_cred_auth			{"idx auth_str"}
+						::Set AuthMode into credtentail[idx]
+						idx: 0 ~ 7
+						auth_str: OPEN, WPAPSK, WPA2PSK, SHARED, WPA, WPA2
+
+wsc_cred_encr			{"idx encr_str"}
+						::Set EncrypType into credtentail[idx]
+						idx: 0 ~ 7
+				 		encr_str: NONE, WEP, TKIP, AES
+
+wsc_cred_keyIdx			{"idx key_index"}
+						::Set Key Index into credtentail[idx]
+						idx: 0 ~ 7
+						key_index: 1 ~ 4
+
+wsc_cred_key			{"idx key"}
+						::Set Key into credtentail[idx]
+						idx: 0 ~ 7
+						key: ASCII string (wep_key_len(=5,13), passphrase_len(=8~63)) 
+					  		 OR 
+					  		 Hex string (wep_key_len(=10,26), passphrase_len(=64))
+
+wsc_cred_mac			{"idx mac_str"}
+						::Set AP's MAC into credtentail[idx]
+						idx: 0 ~ 7
+						mac_str: xx:xx:xx:xx:xx:xx
+
+wsc_conn_by_idx			{0 ~ 7}
+						::Connect AP by credential index
+
+wsc_auto_conn			{0, 1}
+						::Set driver to re-connecting to AP or not after registration.
+						0: Disabled, driver won't re-connect to AP with new configurations.
+						1: Enabled, driver will re-connect to AP with new configurations.
+
+wsc_ap_band 			{0, 1, 2}
+						::Set prefer band to do WPS with dual band WPS AP
+						0 : prefer 2.4G
+						1 : prefer 5G
+						2 : auto
+						Default value is auto (2)
+
+-------------------------------------------------------------------------------------------------------
+USAGE:
 	iwpriv ra0 set [parameters]=[val]
 	
 NOTE:
@@ -196,11 +283,54 @@ FixedTxMode				{CCK, OFDM}
 							= 6		=> 48Mbps
 							= 7		=> 54Mbps
 
+==> Build Ethernet Convert function. Please set 'HAS_ETH_CONVERT_SUPPORT=y' in os/linux/config.mk
+EthConvertMode			{dongle, clone, hybrid}
+						::Set Ethernet Convert Mode
+
+EthCloneMac				{xx:xx:xx:xx:xx:xx}
+						:: Set Clone MAC
+
 LongRetry				{0,255}
 						:: Set Tx Long Retry Limit
 
 ShortRetry				{0,255}
 						:: Set Tx Short Retry Limit
+
+MeshId					{Length 1~32 ascii characters}
+						:: Set Mesh ID
+
+MeshHostName			{Length 1~32 ascii characters}
+						:: Set Mesh Host Name
+
+MeshAutoLink			{1,0}
+						:: Set Mesh Auto Link Capable
+						0: Disabled
+						1: Enabled
+
+MeshAddLink				{xx:xx:xx:xx:xx:xx}
+						:: Add Mesh Link
+
+MeshDelLink				{xx:xx:xx:xx:xx:xx}
+						:: Delete Mesh Link
+
+MeshMultiCastAgeOut		{20 ~ 65535 seconds}
+						:: Set AgeOut time for Mesh MultiCast
+
+MeshAuthMode			{OPEN, WPANONE}
+						:: Set Mesh Authentication Mode
+
+MeshEncrypType			{NONE, WEP, TKIP, AES}
+						:: Set Mesh Encryption Type
+
+MeshDefaultkey			{1 ~ 4}
+						:: Set Mesh Default Key ID
+
+MeshWEPKEY				{5 ascii characters or 10 hex number or 
+                     	13 ascii characters or 26 hex numbers}
+                     	:: Set Mesh WEP Key String
+
+MeshWPAKEY				{8~63 ascii or 64 hex characters}
+						:: Set Mesh WPA Pre-Shared Key
 
 Examples
 ===================================================================
@@ -268,6 +398,20 @@ j> Link with an AP which is the largest strength   ; set ANY SSID (ssidLen=0)
    usage: iwconfig ra0 essid ""                 
    or
    usage: iwpriv ra0 set SSID=""
+
+k> Config STA to link as dongle mode with STA own MAC
+	usage: iwpriv ra0 set EthConvertMode=dongle
+
+l> Config STA to link as clone mode
+	usage: iwpriv ra0 set EthConvertMode=clone
+		   iwpriv ra0 set EthCloneMac="Desired MAC"		;; 00:00:00:00:00:00 means using STA own MAC
+														;; FF:FF:FF:FF:FF:FF means using source MAC of first packet coming from wired device
+
+m> Config STA to link as hybrid(dongle+clone) mode
+	usage: iwpriv ra0 set EthConvertMode=hybrid
+		   iwpriv ra0 set EthCloneMac="Desired MAC"		;; 00:00:00:00:00:00 means using STA own MAC
+														;; FF:FF:FF:FF:FF:FF means using source MAC of first packet coming from wired device
+
 ===================================================================
 
 iwlist
@@ -289,6 +433,7 @@ The following are our support in standard configuration - iwconfig
 iwconfig ra0 essid {NN|on|off}			; set essid
 iwconfig ra0 mode {managed|ad-hoc|...}  ; set wireless mode
 >> rt2860sta driver support monitor mode with linux kernel > 2.4.20.
+>> Note: For using monitor mode => if mesh interface is ON, please down the mesh interface first.
 iwconfig ra0 freq N.NNNN[k|M|G]]		; set frequency
 iwconfig ra0 channel N					; set channel
 iwconfig ra0 ap {N|off|auto}			; set AP address

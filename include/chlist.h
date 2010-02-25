@@ -41,14 +41,14 @@
 #include "rtmp_type.h"
 #include "rtmp_def.h"
 
-
-#define ODOR			0
-#define IDOR			1
-#define BOTH			2
-
 #define BAND_5G         0
 #define BAND_24G        1
 #define BAND_BOTH       2
+
+#ifdef EXT_BUILD_CHANNEL_LIST
+#define ODOR			0
+#define IDOR			1
+#define BOTH			2
 
 typedef struct _CH_DESP {
 	UCHAR FirstChannel;
@@ -65,6 +65,7 @@ typedef struct _CH_REGION {
 } CH_REGION, *PCH_REGION;
 
 extern CH_REGION ChRegion[];
+#endif // EXT_BUILD_CHANNEL_LIST //
 
 typedef struct _CH_FREQ_MAP_{
 	UINT16		channel;
@@ -75,37 +76,15 @@ extern CH_FREQ_MAP CH_HZ_ID_MAP[];
 extern int CH_HZ_ID_MAP_NUM;
 
 
-#define     MAP_CHANNEL_ID_TO_KHZ(_ch, _khz)                 			\
-		do{                                           								\
-			int _chIdx;											\
-			for (_chIdx = 0; _chIdx < CH_HZ_ID_MAP_NUM; _chIdx++)\
-			{													\
-				if ((_ch) == CH_HZ_ID_MAP[_chIdx].channel)			\
-				{												\
-					(_khz) = CH_HZ_ID_MAP[_chIdx].freqKHz * 1000; 	\
-					break;										\
-				}												\
-			}													\
-			if (_chIdx == CH_HZ_ID_MAP_NUM)					\
-				(_khz) = 2412000;									\
-            }while(0)
 
+
+#define     MAP_CHANNEL_ID_TO_KHZ(_ch, _khz)                 \
+			RTMP_MapChannelID2KHZ(_ch, (UINT32 *)&(_khz))
 #define     MAP_KHZ_TO_CHANNEL_ID(_khz, _ch)                 \
-		do{                                           								\
-			int _chIdx;											\
-			for (_chIdx = 0; _chIdx < CH_HZ_ID_MAP_NUM; _chIdx++)\
-			{													\
-				if ((_khz) == CH_HZ_ID_MAP[_chIdx].freqKHz)			\
-				{												\
-					(_ch) = CH_HZ_ID_MAP[_chIdx].channel; 			\
-					break;										\
-				}												\
-			}													\
-			if (_chIdx == CH_HZ_ID_MAP_NUM)					\
-				(_ch) = 1;											\
-		}while(0)
+			RTMP_MapKHZ2ChannelID(_khz, (INT *)&(_ch))
 
 
+#ifdef EXT_BUILD_CHANNEL_LIST
 VOID BuildChannelListEx(
 	IN PRTMP_ADAPTER pAd);
 
@@ -113,6 +92,7 @@ VOID BuildBeaconChList(
 	IN PRTMP_ADAPTER pAd,
 	OUT PUCHAR pBuf,
 	OUT	PULONG pBufLen);
+#endif // EXT_BUILD_CHANNEL_LIST //
 
 #ifdef DOT11_N_SUPPORT
 VOID N_ChannelCheck(
@@ -125,6 +105,14 @@ VOID N_SetCenCh(
 UINT8 GetCuntryMaxTxPwr(
 	IN PRTMP_ADAPTER pAd,
 	IN UINT8 channel);
+
+VOID RTMP_MapChannelID2KHZ(
+	IN UCHAR Ch,
+	OUT UINT32 *pFreq);
+
+VOID RTMP_MapKHZ2ChannelID(
+	IN ULONG Freq,
+	OUT INT *pCh);
 	
 #endif // __CHLIST_H__
 

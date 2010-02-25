@@ -302,31 +302,6 @@ ULONG JapRadarType(
 
 }
 
-ULONG RTMPBbpReadRadarDuration(
-	IN PRTMP_ADAPTER	pAd)
-{
-	UINT8 byteValue = 0;
-	ULONG result;
-
-	BBP_IO_READ8_BY_REG_ID(pAd, BBP_R115, &byteValue);
-
-	result = 0;
-	switch (byteValue)
-	{
-	case 1: // radar signal detected by pulse mode.
-	case 2: // radar signal detected by width mode.
-		result = RTMPReadRadarDuration(pAd);
-		break;
-
-	case 0: // No radar signal.
-	default:
-
-		result = 0;
-		break;
-	}
-
-	return result;
-}
 
 ULONG RTMPReadRadarDuration(
 	IN PRTMP_ADAPTER	pAd)

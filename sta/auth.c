@@ -107,7 +107,7 @@ VOID AuthTimeout(
 		Cls2errAction(pAd, pAd->MlmeAux.Bssid);
 	
 	
-    MlmeEnqueue(pAd, AUTH_STATE_MACHINE, MT2_AUTH_TIMEOUT, 0, NULL);
+    MlmeEnqueue(pAd, AUTH_STATE_MACHINE, MT2_AUTH_TIMEOUT, 0, NULL, 0);
     RTMP_MLME_HANDLER(pAd);
 }
 
@@ -132,7 +132,7 @@ VOID MlmeAuthReqAction(
 		
         pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
         Status = MLME_INVALID_FORMAT;
-        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
     }
 }
 
@@ -150,15 +150,18 @@ VOID PeerAuthRspAtSeq2Action(
 {
     UCHAR         Addr2[MAC_ADDR_LEN];
     USHORT        Seq, Status, RemoteStatus, Alg;
+	UCHAR		  iv_hdr[4];
     UCHAR         ChlgText[CIPHER_TEXT_LEN];
     UCHAR         CyperChlgText[CIPHER_TEXT_LEN + 8 + 8];
-    UCHAR         Element[2];
+	ULONG		  c_len = 0;
     HEADER_802_11 AuthHdr;
     BOOLEAN       TimerCancelled;
     PUCHAR        pOutBuffer = NULL;
     NDIS_STATUS   NStatus;
     ULONG         FrameLen = 0;
     USHORT        Status2;
+	UCHAR		  ChallengeIe = IE_CHALLENGE_TEXT;
+	UCHAR		  len_challengeText = CIPHER_TEXT_LEN;
 
     if (PeerAuthSanity(pAd, Elem->Msg, Elem->MsgLen, Addr2, &Alg, &Seq, &Status, (PCHAR)ChlgText)) 
     {
@@ -173,7 +176,7 @@ VOID PeerAuthRspAtSeq2Action(
                 if (pAd->MlmeAux.Alg == Ndis802_11AuthModeOpen)
                 {
                     pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
-                    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+                    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
                 } 
                 else 
                 {
@@ -188,37 +191,59 @@ VOID PeerAuthRspAtSeq2Action(
                         DBGPRINT(RT_DEBUG_TRACE, ("AUTH - PeerAuthRspAtSeq2Action() allocate memory fail\n"));
                         pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
                         Status2 = MLME_FAIL_NO_RESOURCE;
-                        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status2);
+                        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status2, 0);
                         return;
                     }
                     
                     DBGPRINT(RT_DEBUG_TRACE, ("AUTH - Send AUTH request seq#3...\n"));
                     MgtMacHeaderInit(pAd, &AuthHdr, SUBTYPE_AUTH, 0, Addr2, pAd->MlmeAux.Bssid);
                     AuthHdr.FC.Wep = 1;
-                    // Encrypt challenge text & auth information
-                    RTMPInitWepEngine(
-                    	pAd,
-                    	pAd->SharedKey[BSS0][pAd->StaCfg.DefaultKeyId].Key,
-                    	pAd->StaCfg.DefaultKeyId,
-                    	pAd->SharedKey[BSS0][pAd->StaCfg.DefaultKeyId].KeyLen,
-                    	CyperChlgText);
+
+					/* TSC increment */ 
+					INC_TX_TSC(pAd->SharedKey[BSS0][pAd->StaCfg.DefaultKeyId].TxTsc, LEN_WEP_TSC);
+
+					/* Construct the 4-bytes WEP IV header */
+					RTMPConstructWEPIVHdr(pAd->StaCfg.DefaultKeyId, 
+										  pAd->SharedKey[BSS0][pAd->StaCfg.DefaultKeyId].TxTsc, 
+										  iv_hdr);
 
 					Alg = cpu2le16(*(USHORT *)&Alg);
 					Seq = cpu2le16(*(USHORT *)&Seq);
 					RemoteStatus= cpu2le16(*(USHORT *)&RemoteStatus);                    				
 
-					RTMPEncryptData(pAd, (PUCHAR) &Alg, CyperChlgText + 4, 2);
-					RTMPEncryptData(pAd, (PUCHAR) &Seq, CyperChlgText + 6, 2);
-					RTMPEncryptData(pAd, (PUCHAR) &RemoteStatus, CyperChlgText + 8, 2);
-					Element[0] = 16;
-					Element[1] = 128;
-					RTMPEncryptData(pAd, Element, CyperChlgText + 10, 2);
-					RTMPEncryptData(pAd, ChlgText, CyperChlgText + 12, 128);
-					RTMPSetICV(pAd, CyperChlgText + 140);
+					/* Construct message text */
+					MakeOutgoingFrame(CyperChlgText,        &c_len, 
+							          2,                    &Alg, 
+							          2,                    &Seq,
+							          2,                    &RemoteStatus,  
+							          1,					&ChallengeIe, 
+							          1,					&len_challengeText,
+							          len_challengeText,	ChlgText,
+							          END_OF_ARGS);
+
+					if (RTMPSoftEncryptWEP(pAd, 
+										   iv_hdr, 
+										   &pAd->SharedKey[BSS0][pAd->StaCfg.DefaultKeyId],
+										   CyperChlgText, 
+										   c_len) == FALSE)
+					{
+						MlmeFreeMemory(pAd, pOutBuffer);
+                        pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
+                        Status2 = MLME_FAIL_NO_RESOURCE;
+                        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status2, 0);
+                        return;
+					}
+						
+					/* Update the total length for 4-bytes ICV */
+					c_len += LEN_ICV;
+						
                     MakeOutgoingFrame(pOutBuffer,               &FrameLen, 
                                       sizeof(HEADER_802_11),    &AuthHdr,  
-                                      CIPHER_TEXT_LEN + 16,     CyperChlgText, 
+							          LEN_WEP_IV_HDR,			iv_hdr,								          
+							          c_len,     				CyperChlgText, 
                                       END_OF_ARGS);
+				
+                   
                     MiniportMMRequest(pAd, 0, pOutBuffer, FrameLen);
                 	MlmeFreeMemory(pAd, pOutBuffer);
 
@@ -231,7 +256,7 @@ VOID PeerAuthRspAtSeq2Action(
                 pAd->StaCfg.AuthFailReason = Status;
                 COPY_MAC_ADDR(pAd->StaCfg.AuthFailSta, Addr2);
                 pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
-                MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+                MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
             }
         }
     }
@@ -272,7 +297,7 @@ VOID PeerAuthRspAtSeq4Action(
             }                
 
             pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
-            MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+            MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
         }
     }
     else
@@ -308,7 +333,7 @@ VOID MlmeDeauthReqAction(
         DBGPRINT(RT_DEBUG_TRACE, ("AUTH - MlmeDeauthReqAction() allocate memory fail\n"));
         pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
         Status = MLME_FAIL_NO_RESOURCE;
-        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_DEAUTH_CONF, 2, &Status);
+        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_DEAUTH_CONF, 2, &Status, 0);
         return;
     }
 
@@ -326,11 +351,10 @@ VOID MlmeDeauthReqAction(
     COPY_MAC_ADDR(pAd->StaCfg.DeauthSta, pInfo->Addr);
     pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
     Status = MLME_SUCCESS;
-    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_DEAUTH_CONF, 2, &Status);
+    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_DEAUTH_CONF, 2, &Status, 0);
 
 	// send wireless event - for deauthentication
-	if (pAd->CommonCfg.bWirelessEvent)
-		RTMPSendWirelessEvent(pAd, IW_DEAUTH_EVENT_FLAG, pAd->MacTab.Content[BSSID_WCID].Addr, BSS0, 0); 
+		RTMPSendWirelessEvent(pAd, IW_DEAUTH_EVENT_FLAG, NULL, BSS0, 0); 
 }
 
 /*
@@ -349,7 +373,7 @@ VOID AuthTimeoutAction(
     DBGPRINT(RT_DEBUG_TRACE, ("AUTH - AuthTimeoutAction\n"));
     pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
     Status = MLME_REJ_TIMEOUT;
-    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
 }
 
 /*
@@ -368,7 +392,7 @@ VOID InvalidStateWhenAuth(
     DBGPRINT(RT_DEBUG_TRACE, ("AUTH - InvalidStateWhenAuth (state=%ld), reset AUTH state machine\n", pAd->Mlme.AuthMachine.CurrState));
     pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
     Status = MLME_STATE_MACHINE_REJECT;
-    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+    MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
 }
 
 /*
@@ -434,7 +458,7 @@ BOOLEAN	AUTH_ReqSend(
         DBGPRINT(RT_DEBUG_TRACE, ("%s - Block Auth request durning WPA block period!\n", pSMName));
         pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
         Status = MLME_STATE_MACHINE_REJECT;
-        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
 	}	
     else if(MlmeAuthReqSanity(pAd, pElem->Msg, pElem->MsgLen, Addr, &Timeout, &Alg)) 
     {
@@ -452,7 +476,7 @@ BOOLEAN	AUTH_ReqSend(
             DBGPRINT(RT_DEBUG_TRACE, ("%s - MlmeAuthReqAction(Alg:%d) allocate memory failed\n", pSMName, Alg));
             pAd->Mlme.AuthMachine.CurrState = AUTH_REQ_IDLE;
             Status = MLME_FAIL_NO_RESOURCE;
-            MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status);
+            MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_AUTH_CONF, 2, &Status, 0);
             return FALSE;
         }
 

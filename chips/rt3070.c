@@ -57,21 +57,24 @@ VOID NICInitRT3070RFRegisters(IN PRTMP_ADAPTER pAd)
 		// Init RF calibration
 		// Driver should toggle RF R30 bit7 before init RF registers
 		UINT32 RfReg = 0;          
-		UINT32 data;
-		
-		RT30xxReadRFRegister(pAd, RF_R30, (PUCHAR)&RfReg);
-		RfReg |= 0x80;
-		RT30xxWriteRFRegister(pAd, RF_R30, (UCHAR)RfReg);
-		RTMPusecDelay(1000);
-		RfReg &= 0x7F;
-		RT30xxWriteRFRegister(pAd, RF_R30, (UCHAR)RfReg);        
+		UINT32 data;          
 
-		// Initialize RF register to default value
-		for (i = 0; i < NUM_RF_REG_PARMS; i++)
-		{
-			RT30xxWriteRFRegister(pAd, RT30xx_RFRegTable[i].Register, RT30xx_RFRegTable[i].Value);
-		}
+                RT30xxReadRFRegister(pAd, RF_R30, (PUCHAR)&RfReg);
+                RfReg |= 0x80;
+                RT30xxWriteRFRegister(pAd, RF_R30, (UCHAR)RfReg);
+                RTMPusecDelay(1000);
+                RfReg &= 0x7F;
+                RT30xxWriteRFRegister(pAd, RF_R30, (UCHAR)RfReg);        
+
+                // Initialize RF register to default value
+		for (i = 0; i < NUM_RF_3020_REG_PARMS; i++)
+                {
+                        RT30xxWriteRFRegister(pAd, RT3020_RFRegTable[i].Register, RT3020_RFRegTable[i].Value);
+                }
  
+		// init R31
+		RT30xxWriteRFRegister(pAd, RF_R31, 0x14);
+
 		// add by johnli
 		if (IS_RT3070(pAd))
 		{
@@ -93,9 +96,6 @@ VOID NICInitRT3070RFRegisters(IN PRTMP_ADAPTER pAd)
 			RT30xxReadRFRegister(pAd, RF_R06, (PUCHAR)&RfReg);
 			RfReg |= 0x40;
 			RT30xxWriteRFRegister(pAd, RF_R06, (UCHAR)RfReg);
-
-			// init R31
-			RT30xxWriteRFRegister(pAd, RF_R31, 0x14);
 
 			// RT3071 version E has fixed this issue
 			if ((pAd->NicConfig2.field.DACTestBit == 1) && ((pAd->MACVersion & 0xffff) < 0x0211))
@@ -140,7 +140,13 @@ VOID NICInitRT3070RFRegisters(IN PRTMP_ADAPTER pAd)
 		data |= 0x01;
 		RTUSBWriteMACRegister(pAd, OPT_14, data);
 
-		// move from RT30xxLoadRFNormalModeSetup because it's needed for both RT3070 and RT3071
+		if (IS_RT3071(pAd))
+		{
+			// RF power sequence setup, load RF normal operation-mode setup
+			RT30xxLoadRFNormalModeSetup(pAd);
+		}
+		else if (IS_RT3070(pAd))
+		{	
 		// TX_LO1_en, RF R17 register Bit 3 to 0
 		RT30xxReadRFRegister(pAd, RF_R17, &RFValue);
 		RFValue &= (~0x08);
@@ -160,13 +166,6 @@ VOID NICInitRT3070RFRegisters(IN PRTMP_ADAPTER pAd)
 		}
 		RT30xxWriteRFRegister(pAd, RF_R17, RFValue);
 		
-		if (IS_RT3071(pAd))
-		{
-			// add by johnli, RF power sequence setup, load RF normal operation-mode setup
-			RT30xxLoadRFNormalModeSetup(pAd);
-		}
-		else if (IS_RT3070(pAd))
-		{	
 			/* add by johnli, reset RF_R27 when interface down & up to fix throughput problem*/
 			// LDORF_VC, RF R27 register Bit 2 to 0
 			RT30xxReadRFRegister(pAd, RF_R27, &RFValue);
@@ -179,7 +178,7 @@ VOID NICInitRT3070RFRegisters(IN PRTMP_ADAPTER pAd)
 			RT30xxWriteRFRegister(pAd, RF_R27, RFValue);
 			/* end johnli */
 		}
-	}	
+        }	
 
 }
 #endif // RT3070 //

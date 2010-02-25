@@ -106,341 +106,6 @@ UINT FCSTAB_32[256] =
 }; 
 
 /*
-UCHAR   WEPKEY[] = {
-		//IV
-		0x00, 0x11, 0x22, 
-		//WEP KEY
-		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC 
-	};
- */
-
-/*
-	========================================================================
-
-	Routine	Description:
-		Init WEP function.	
-		
-	Arguments:
-      pAd		Pointer to our adapter
-		pKey        Pointer to the WEP KEY
-		KeyId		   WEP Key ID
-		KeyLen      the length of WEP KEY
-		pDest       Pointer to the destination which Encryption data will store in.
-		
-	Return Value:
-		None
-
-	IRQL = DISPATCH_LEVEL
-	
-	Note:
-	
-	========================================================================
-*/
-VOID	RTMPInitWepEngine(
-	IN	PRTMP_ADAPTER	pAd,	
-	IN	PUCHAR			pKey,
-	IN	UCHAR			KeyId,
-	IN	UCHAR			KeyLen, 
-	IN OUT	PUCHAR		pDest)
-{
-	UINT i;
-	UCHAR   WEPKEY[] = {
-		//IV
-		0x00, 0x11, 0x22, 
-		//WEP KEY
-		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC 
-	};
-
-	pAd->PrivateInfo.FCSCRC32 = PPPINITFCS32;   //Init crc32.
-
-    {
-		NdisMoveMemory(WEPKEY + 3, pKey, KeyLen);
-
-        for(i = 0; i < 3; i++)
-			WEPKEY[i] = RandomByte(pAd);   //Call mlme RandomByte() function.
-		ARCFOUR_INIT(&pAd->PrivateInfo.WEPCONTEXT, WEPKEY, KeyLen + 3);  //INIT SBOX, KEYLEN+3(IV)
-
-		NdisMoveMemory(pDest, WEPKEY, 3);  //Append Init Vector 
-    }
-	*(pDest+3) = (KeyId << 6);       //Append KEYID 
-	
-}
-
-/*
-	========================================================================
-
-	Routine	Description:
-		Encrypt transimitted data		
-		
-	Arguments:
-      pAd		Pointer to our adapter
-      pSrc        Pointer to the transimitted source data that will be encrypt
-      pDest       Pointer to the destination where entryption data will be store in.
-      Len			Indicate the length of the source data
-		
-	Return Value:
-      None
-		        
-	IRQL = DISPATCH_LEVEL
-
-	Note:
-	
-	========================================================================
-*/
-VOID	RTMPEncryptData(
-	IN	PRTMP_ADAPTER	pAd,	
-	IN	PUCHAR			pSrc,
-	IN	PUCHAR			pDest,
-	IN	UINT			Len)
-{
-	pAd->PrivateInfo.FCSCRC32 = RTMP_CALC_FCS32(pAd->PrivateInfo.FCSCRC32, pSrc, Len);
-	ARCFOUR_ENCRYPT(&pAd->PrivateInfo.WEPCONTEXT, pDest, pSrc, Len);
-}
-
-
-/*
-	========================================================================
-
-	Routine	Description:
-		Decrypt received WEP data	
-		
-	Arguments:
-		pAdapter		Pointer to our adapter
-		pSrc        Pointer to the received data
-		Len         the length of the received data
-		
-	Return Value:
-		TRUE        Decrypt WEP data success
-		FALSE       Decrypt WEP data failed
-		
-	Note:
-	
-	========================================================================
-*/
-BOOLEAN	RTMPSoftDecryptWEP(
-	IN PRTMP_ADAPTER 	pAd,
-	IN PUCHAR			pData,
-	IN ULONG			DataByteCnt,
-	IN PCIPHER_KEY		pGroupKey)
-{
-	UINT	trailfcs;
-	UINT    crc32;
-	UCHAR	KeyIdx;
-	UCHAR   WEPKEY[] = {
-		//IV
-		0x00, 0x11, 0x22, 
-		//WEP KEY
-		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC 
-	};
-	UCHAR 	*pPayload = (UCHAR *)pData + LENGTH_802_11;
-	ULONG	payload_len = DataByteCnt - LENGTH_802_11;
-
-	NdisMoveMemory(WEPKEY, pPayload, 3);    //Get WEP IV
-	
-	KeyIdx = (*(pPayload + 3) & 0xc0) >> 6;
-	if (pGroupKey[KeyIdx].KeyLen == 0)
-		return (FALSE);
-
-	NdisMoveMemory(WEPKEY + 3, pGroupKey[KeyIdx].Key, pGroupKey[KeyIdx].KeyLen);	
-	ARCFOUR_INIT(&pAd->PrivateInfo.WEPCONTEXT, WEPKEY, pGroupKey[KeyIdx].KeyLen + 3);
-	ARCFOUR_DECRYPT(&pAd->PrivateInfo.WEPCONTEXT, pPayload, pPayload + 4, payload_len - 4);
-	NdisMoveMemory(&trailfcs, pPayload + payload_len - 8, 4);
-	crc32 = RTMP_CALC_FCS32(PPPINITFCS32, pPayload, payload_len - 8);  //Skip last 4 bytes(FCS).
-	crc32 ^= 0xffffffff;             /* complement */
-
-    if(crc32 != cpu2le32(trailfcs))
-    {
-		DBGPRINT(RT_DEBUG_TRACE, ("! WEP Data CRC Error !\n"));	 //CRC error.
-		return (FALSE);
-	}
-	return (TRUE);
-}
-
-/*
-	========================================================================
-
-	Routine	Description:
-		The Stream Cipher Encryption Algorithm "ARCFOUR" initialize		
-		
-	Arguments:
-	   Ctx         Pointer to ARCFOUR CONTEXT (SBOX)
-		pKey        Pointer to the WEP KEY
-		KeyLen      Indicate the length fo the WEP KEY
-		
-	Return Value:
-	   None
-		
-	IRQL = DISPATCH_LEVEL
-	
-	Note:
-	
-	========================================================================
-*/
-VOID	ARCFOUR_INIT(
-	IN	PARCFOURCONTEXT	Ctx,
-	IN	PUCHAR			pKey,
-	IN	UINT			KeyLen)
-{
-	UCHAR	t, u;
-	UINT	keyindex;
-	UINT	stateindex;
-	PUCHAR	state;
-	UINT	counter;
-	
-	state = Ctx->STATE;
-	Ctx->X = 0;
-	Ctx->Y = 0;
-	for (counter = 0; counter < 256; counter++)
-		state[counter] = (UCHAR)counter;
-	keyindex = 0;
-	stateindex = 0;
-	for (counter = 0; counter < 256; counter++)
-	{
-		t = state[counter];
-		stateindex = (stateindex + pKey[keyindex] + t) & 0xff;
-		u = state[stateindex];
-		state[stateindex] = t;
-		state[counter] = u;
-		if (++keyindex >= KeyLen)
-			keyindex = 0;
-	}
-}
-
-/*
-	========================================================================
-
-	Routine	Description:
-		Get bytes from ARCFOUR CONTEXT (S-BOX)				
-		
-	Arguments:
-	   Ctx         Pointer to ARCFOUR CONTEXT (SBOX)
-		
-	Return Value:
-	   UCHAR  - the value of the ARCFOUR CONTEXT (S-BOX)		
-		
-	Note:
-	
-	========================================================================
-*/
-UCHAR	ARCFOUR_BYTE(
-	IN	PARCFOURCONTEXT		Ctx)
-{
-  UINT x;
-  UINT y;
-  UCHAR sx, sy;
-  PUCHAR state;
-  
-  state = Ctx->STATE;
-  x = (Ctx->X + 1) & 0xff;
-  sx = state[x];
-  y = (sx + Ctx->Y) & 0xff;
-  sy = state[y];
-  Ctx->X = x;
-  Ctx->Y = y;
-  state[y] = sx;
-  state[x] = sy;
-
-  return(state[(sx + sy) & 0xff]);
-  
-}
-
-/*
-	========================================================================
-
-	Routine	Description:
-		The Stream Cipher Decryption Algorithm 		
-		
-	Arguments:
-		Ctx         Pointer to ARCFOUR CONTEXT (SBOX)
-		pDest			Pointer to the Destination 
-		pSrc        Pointer to the Source data
-		Len         Indicate the length of the Source data
-		
-	Return Value:
-		None
-		
-	Note:
-	
-	========================================================================
-*/
-VOID	ARCFOUR_DECRYPT(
-	IN	PARCFOURCONTEXT	Ctx,
-	IN	PUCHAR			pDest, 
-	IN	PUCHAR			pSrc,
-	IN	UINT			Len)
-{
-	UINT i;
-
-	for (i = 0; i < Len; i++)
-		pDest[i] = pSrc[i] ^ ARCFOUR_BYTE(Ctx);
-}
-
-/*
-	========================================================================
-
-	Routine	Description:
-		The Stream Cipher Encryption Algorithm 		
-		
-	Arguments:
-		Ctx         Pointer to ARCFOUR CONTEXT (SBOX)
-		pDest			Pointer to the Destination 
-		pSrc        Pointer to the Source data
-		Len         Indicate the length of the Source dta
-		
-	Return Value:
-		None
-		        
-	IRQL = DISPATCH_LEVEL
-
-	Note:
-	
-	========================================================================
-*/
-VOID	ARCFOUR_ENCRYPT(
-	IN	PARCFOURCONTEXT	Ctx,
-	IN	PUCHAR			pDest,
-	IN	PUCHAR			pSrc,
-	IN	UINT			Len)
-{
-	UINT i;
-
-	for (i = 0; i < Len; i++)
-		pDest[i] = pSrc[i] ^ ARCFOUR_BYTE(Ctx);
-}
-
-/*
-	========================================================================
-
-	Routine	Description:
-		The Stream Cipher Encryption Algorithm which conform to the special requirement to encrypt  GTK.
-		
-	Arguments:
-		Ctx         Pointer to ARCFOUR CONTEXT (SBOX)
-		pDest			Pointer to the Destination 
-		pSrc        Pointer to the Source data
-		Len         Indicate the length of the Source dta
-		
-		
-	========================================================================
-*/
-
-VOID	WPAARCFOUR_ENCRYPT(
-	IN	PARCFOURCONTEXT	Ctx,
-	IN	PUCHAR			pDest,
-	IN	PUCHAR			pSrc,
-	IN	UINT			Len)
-{
-	UINT i;
-        //discard first 256 bytes
-	for (i = 0; i < 256; i++)
-            ARCFOUR_BYTE(Ctx);
-    
-	for (i = 0; i < Len; i++)
-		pDest[i] = pSrc[i] ^ ARCFOUR_BYTE(Ctx);
-}
-
-
-/*
 	========================================================================
 
 	Routine	Description:
@@ -471,30 +136,207 @@ UINT	RTMP_CALC_FCS32(
 	return (Fcs); 
 } 
 
+/*
+	========================================================================
+
+	Routine	Description:
+		Init WEP function.	
+		
+	Arguments:
+      pAd		Pointer to our adapter
+		pKey        Pointer to the WEP KEY
+		KeyId		   WEP Key ID
+		KeyLen      the length of WEP KEY
+		pDest       Pointer to the destination which Encryption data will store in.
+		
+	Return Value:
+		None
+
+	IRQL = DISPATCH_LEVEL
+	
+	Note:
+	
+	========================================================================
+*/
+VOID	RTMPInitWepEngine(
+	IN	PUCHAR			pIv,
+	IN	PUCHAR			pKey,
+	IN	UCHAR			KeyLen,
+	OUT	ARC4_CTX_STRUC  *pARC4_CTX)
+{	
+	UCHAR   seed[16];
+	UINT8	seed_len;
+		
+	/* WEP seed construction */
+	NdisZeroMemory(seed, 16);
+	NdisMoveMemory(seed, pIv, 3);
+	NdisMoveMemory(&seed[3], pKey, KeyLen);
+	seed_len = 3 + KeyLen;
+
+	/* RC4 uses a pseudo-random number generator (PRNG) 
+	   to generate a key stream */
+	ARC4_INIT(pARC4_CTX, &seed[0], seed_len);    		
+}
+
+/*
+	========================================================================
+	
+	Routine Description:
+		Construct WEP IV header.
+
+	Arguments:
+		
+	Return Value:
+
+	Note:
+		It's a 4-octets header.
+				
+	========================================================================
+*/
+VOID RTMPConstructWEPIVHdr(
+	IN	UINT8 			key_idx,
+	IN	UCHAR			*pn,	
+	OUT	UCHAR			*iv_hdr)
+{	
+	NdisZeroMemory(iv_hdr, LEN_WEP_IV_HDR);
+
+	NdisMoveMemory(iv_hdr, pn, LEN_WEP_TSC);
+
+	/* Append key index */
+	iv_hdr[3] = (key_idx << 6);        
+}
 
 /*
 	========================================================================
 
 	Routine	Description:
-		Get last FCS and encrypt it to the destination				
+		WEP MPDU cryptographic encapsulation 	
 		
 	Arguments:
-		pDest			Pointer to the Destination 
+		pAdapter		Pointer to our adapter
+		pSrc        Pointer to the received data
+		Len         the length of the received data
 		
 	Return Value:
-		None
 		
 	Note:
 	
 	========================================================================
 */
-VOID	RTMPSetICV(
-	IN	PRTMP_ADAPTER	pAd,
-	IN	PUCHAR	pDest)
+BOOLEAN	RTMPSoftEncryptWEP(
+	IN 		PRTMP_ADAPTER 	pAd,
+	IN 		PUCHAR			pIvHdr,
+	IN 		PCIPHER_KEY		pKey,
+	INOUT 	PUCHAR			pData,
+	IN 		ULONG			DataByteCnt)
 {
-	pAd->PrivateInfo.FCSCRC32 ^= 0xffffffff;             /* complement */
-	pAd->PrivateInfo.FCSCRC32 = cpu2le32(pAd->PrivateInfo.FCSCRC32);
+	ARC4_CTX_STRUC ARC4_CTX; 
+	UINT 	FCSCRC32;
+
+	if (pKey->KeyLen == 0)
+	{
+		DBGPRINT(RT_DEBUG_ERROR, ("%s : The key is empty !\n", __FUNCTION__));
+		return FALSE;
+	}
+
+	/* Initialize WEP key stream */
+	RTMPInitWepEngine(pIvHdr, 
+					  pKey->Key, 					   
+					  pKey->KeyLen,
+					  &ARC4_CTX);
+
+	/* WEP computes the ICV over the plaintext data */
+	FCSCRC32 = RTMP_CALC_FCS32(PPPINITFCS32, pData, DataByteCnt);
+	FCSCRC32 ^= 0xffffffff;             /* complement */
+	FCSCRC32 = cpu2le32(FCSCRC32);
+
+	/* Append 4-bytes ICV after the MPDU data */
+	NdisMoveMemory(pData + DataByteCnt, (PUCHAR)&FCSCRC32, LEN_ICV);
+
+	/* Encrypt the MPDU plaintext data and ICV using ARC4 with a seed */
+	ARC4_Compute(&ARC4_CTX, pData, DataByteCnt + LEN_ICV, pData);
+
+	return TRUE;
+}
+
+
+/*
+	========================================================================
+
+	Routine	Description:
+		Decrypt received WEP data	
+		
+	Arguments:
+		pAdapter		Pointer to our adapter
+		pSrc        Pointer to the received data
+		Len         the length of the received data
+		
+	Return Value:
+		TRUE        Decrypt WEP data success
+		FALSE       Decrypt WEP data failed
+		
+	Note:
 	
-	ARCFOUR_ENCRYPT(&pAd->PrivateInfo.WEPCONTEXT, pDest, (PUCHAR) &pAd->PrivateInfo.FCSCRC32, 4);
+	========================================================================
+*/
+BOOLEAN	RTMPSoftDecryptWEP(
+	IN 		PRTMP_ADAPTER 	pAd,
+	IN 		PCIPHER_KEY		pKey,
+	INOUT 	PUCHAR			pData,
+	INOUT 	UINT16			*DataByteCnt)
+{
+	ARC4_CTX_STRUC 	ARC4_CTX; 	
+	PUCHAR			plaintext_ptr;
+	UINT16			plaintext_len;
+	PUCHAR			ciphertext_ptr;
+	UINT16			ciphertext_len;
+	UINT			trailfcs;
+	UINT    		crc32;
+	
+	if (pKey->KeyLen == 0)
+	{
+		DBGPRINT(RT_DEBUG_ERROR, ("%s : The key is not available !\n", __FUNCTION__));
+		return FALSE;
+	}
+
+	/* Initialize WEP key stream */
+	RTMPInitWepEngine(pData, 
+					  pKey->Key, 					   
+					  pKey->KeyLen,
+					  &ARC4_CTX);
+
+	/* Skip the WEP IV header (4-bytes) */
+	ciphertext_ptr = pData + LEN_WEP_IV_HDR;
+	ciphertext_len = *DataByteCnt - LEN_WEP_IV_HDR;
+	
+	/* Decrypt the WEP MPDU. It shall include plaintext and ICV.
+	   The result output would overwrite the original WEP IV header position */
+	ARC4_Compute(&ARC4_CTX, 
+				 ciphertext_ptr, 
+				 ciphertext_len, 
+				 pData);
+
+	/* Point to the decrypted data frame and its length shall exclude ICV length */
+	plaintext_ptr = pData;
+	plaintext_len = ciphertext_len - LEN_ICV;
+
+	/* Extract peer's the ICV */
+	NdisMoveMemory(&trailfcs, plaintext_ptr + plaintext_len, LEN_ICV);
+
+	/* WEP recomputes the ICV and 
+	   bit-wise compares it with the decrypted ICV from the MPDU. */
+	crc32 = RTMP_CALC_FCS32(PPPINITFCS32, plaintext_ptr, plaintext_len);
+	crc32 ^= 0xffffffff;             /* complement */
+
+    if(crc32 != cpu2le32(trailfcs))
+    {
+		DBGPRINT(RT_DEBUG_ERROR, ("! WEP Data CRC Error !\n"));	 //CRC error.
+		return FALSE;
+	}
+
+	/* Update the total data length */
+	*DataByteCnt = plaintext_len;
+	
+	return TRUE;
 }
 

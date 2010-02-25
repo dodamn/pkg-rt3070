@@ -22,28 +22,50 @@
  * Free Software Foundation, Inc.,                                       * 
  * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             * 
  *                                                                       * 
- *************************************************************************
+ *************************************************************************/
 
+/****************************************************************************
     Module Name:
-    rt33xx.h
+    RC4
 
     Abstract:
-
+    
     Revision History:
-    Who          When          What
-    ---------    ----------    ----------------------------------------------
- */
+    Who         When            What
+    --------    ----------      ------------------------------------------
+    Eddy        2009/05/13      ARC4
+***************************************************************************/
 
-#ifndef __RT33XX_H__
-#define __RT33XX_H__
+#ifndef __CRYPT_ARC4_H__
+#define __CRYPT_ARC4_H__
 
-#ifdef RT33xx
+#include "rt_config.h"
+
+/* ARC4 definition & structure */
+#define ARC4_KEY_BLOCK_SIZE 256
+
+typedef struct {
+    UINT BlockIndex1;
+    UINT BlockIndex2;
+    UINT8 KeyBlock[256];
+} ARC4_CTX_STRUC, *PARC4_CTX_STRUC;
 
 
-extern REG_PAIR RFRegTableOverRT3390[];
-extern UCHAR NUM_RF_REG_PARMS_OVER_RT3390;
+/* ARC4 operations */
+VOID ARC4_INIT (
+    IN ARC4_CTX_STRUC *pARC4_CTX,
+    IN PUCHAR pKey,
+	IN UINT KeyLength);
 
-#endif // RT33xx //
+VOID ARC4_Compute (
+    IN ARC4_CTX_STRUC *pARC4_CTX,
+    IN UINT8 InputBlock[],
+    IN UINT InputBlockSize,
+    OUT UINT8 OutputBlock[]);
 
-#endif //__RT33XX_H__ //
+VOID ARC4_Discard_KeyLength (
+    IN ARC4_CTX_STRUC *pARC4_CTX,
+    IN UINT Length);
+
+#endif /* __CRYPT_ARC4_H__ */
 

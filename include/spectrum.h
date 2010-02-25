@@ -32,6 +32,10 @@
 #include "spectrum_def.h"
 
 
+UINT8 GetRegulatoryMaxTxPwr(
+	IN PRTMP_ADAPTER pAd,
+	IN UINT8 channel);
+
 CHAR RTMP_GetTxPwr(
 	IN PRTMP_ADAPTER pAd,
 	IN HTTRANSMIT_SETTING HTTxMode);
@@ -58,7 +62,7 @@ VOID MakeMeasurementReqFrame(
 	IN UINT8 MeasureToken, 
 	IN UINT8 MeasureReqMode,
 	IN UINT8 MeasureReqType,
-	IN UINT8 NumOfRepetitions);
+	IN UINT16 NumOfRepetitions);
 
 /*
 	==========================================================================
@@ -118,6 +122,7 @@ VOID EnqueueTPCRep(
 	IN UINT8 TxPwr,
 	IN UINT8 LinkMargin);
 
+#ifdef WDS_SUPPORT
 /*
 	==========================================================================
 	Description:
@@ -137,6 +142,7 @@ VOID EnqueueChSwAnn(
 	IN PUCHAR pDA, 
 	IN UINT8 ChSwMode,
 	IN UINT8 NewCh);
+#endif // WDS_SUPPORT //
 
 /*
 	==========================================================================
@@ -176,7 +182,7 @@ INT Set_PwrConstraint(
 	IN	PSTRING			arg);
 
 
-VOID MeasureReqTabInit(
+NDIS_STATUS	MeasureReqTabInit(
 	IN PRTMP_ADAPTER pAd);
 
 VOID MeasureReqTabExit(
@@ -214,7 +220,7 @@ VOID InsertDialogToken(
 	OUT PULONG pFrameLen,
 	IN UINT8 DialogToken);
 
-VOID TpcReqTabInit(
+NDIS_STATUS	TpcReqTabInit(
 	IN PRTMP_ADAPTER pAd);
 
 VOID TpcReqTabExit(

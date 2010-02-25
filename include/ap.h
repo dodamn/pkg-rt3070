@@ -55,6 +55,10 @@ BOOLEAN APBridgeToWirelessSta(
     IN  UINT            DataLen,
     IN  ULONG           fromwdsidx);
 
+VOID RTMP_BASetup(
+	IN PRTMP_ADAPTER pAd,
+	IN PMAC_TABLE_ENTRY pMacEntry,
+	IN UINT8 UserPriority);
 
 VOID	APSendPackets(
 	IN	NDIS_HANDLE		MiniportAdapterContext,
@@ -152,9 +156,7 @@ USHORT APBuildAssociation(
     IN UCHAR  *pRSNLen, 
     IN BOOLEAN bWmmCapable,
     IN ULONG  RalinkIe,
-#ifdef DOT11N_DRAFT3
     IN EXT_CAP_INFO_ELEMENT ExtCapInfo,
-#endif // DOT11N_DRAFT3 //
 	IN HT_CAPABILITY_IE		*pHtCapability,
 	IN UCHAR		 HtCapabilityLen,
     OUT USHORT *pAid);
@@ -263,6 +265,11 @@ BOOLEAN ApScanRunning(
 #ifdef DOT11N_DRAFT3
 VOID APOverlappingBSSScan(
 	IN RTMP_ADAPTER *pAd);
+
+INT GetBssCoexEffectedChRange(
+	IN RTMP_ADAPTER *pAd,
+	IN BSS_COEX_CH_RANGE *pCoexChRange);
+
 #endif // DOT11N_DRAFT3 //
 
 // ap_wpa.c
@@ -308,6 +315,7 @@ VOID APQuickResponeForRateUpExec(
     IN PVOID SystemSpecific2, 
     IN PVOID SystemSpecific3);
 
+
 #ifdef RTMP_MAC_USB
 VOID BeaconUpdateExec(
     IN PVOID SystemSpecific1, 
@@ -327,11 +335,6 @@ VOID APAsicRxAntEvalTimeout(
 	IN PRTMP_ADAPTER	pAd);
 
 // ap.c
-
-VOID APSwitchChannel(
-	IN PRTMP_ADAPTER pAd,
-	IN INT Channel);
-
 NDIS_STATUS APInitialize(
     IN  PRTMP_ADAPTER   pAd);
 
@@ -386,10 +389,14 @@ BOOLEAN APPsIndicate(
 	IN ULONG Wcid, 
     IN  UCHAR           Psm);
 
+#ifdef SYSTEM_LOG_SUPPORT
 VOID ApLogEvent(
     IN PRTMP_ADAPTER    pAd,
     IN PUCHAR           pAddr,
     IN USHORT           Event);
+#else
+#define ApLogEvent(_pAd, _pAddr, _Event)
+#endif // SYSTEM_LOG_SUPPORT //
 
 #ifdef DOT11_N_SUPPORT
 VOID APUpdateOperationMode(
@@ -418,19 +425,6 @@ VOID ApEnqueueNullFrame(
     IN BOOLEAN       bEOSP,
     IN UCHAR         OldUP);
 
-VOID ApSendFrame(
-    IN  PRTMP_ADAPTER   pAd,
-    IN  PVOID           pBuffer,
-    IN  ULONG           Length,
-    IN  UCHAR           TxRate,
-    IN  UCHAR           PID);
-
-VOID ApEnqueueAckFrame(
-    IN PRTMP_ADAPTER pAd,
-    IN PUCHAR        pAddr,
-    IN UCHAR         TxRate,
-	IN UCHAR         apidx);
-
 // ap_sanity.c
 
 
@@ -451,9 +445,7 @@ BOOLEAN PeerAssocReqCmmSanity(
     OUT UCHAR *pRSNLen,
     OUT BOOLEAN *pbWmmCapable,
     OUT ULONG  *pRalinkIe,
-#ifdef DOT11N_DRAFT3
     OUT EXT_CAP_INFO_ELEMENT	*pExtCapInfo,
-#endif // DOT11N_DRAFT3 //
     OUT UCHAR		 *pHtCapabilityLen,
     OUT HT_CAPABILITY_IE *pHtCapability);
 
@@ -463,6 +455,7 @@ BOOLEAN PeerDisassocReqSanity(
     IN VOID *Msg, 
     IN ULONG MsgLen, 
     OUT PUCHAR pAddr2, 
+    OUT	UINT16	*SeqNum,
     OUT USHORT *Reason);
 
 BOOLEAN PeerDeauthReqSanity(
@@ -470,6 +463,7 @@ BOOLEAN PeerDeauthReqSanity(
     IN VOID *Msg, 
     IN ULONG MsgLen, 
     OUT PUCHAR pAddr2, 
+   	OUT	UINT16	*SeqNum,    
     OUT USHORT *Reason);
 
 BOOLEAN APPeerAuthSanity(
@@ -484,37 +478,40 @@ BOOLEAN APPeerAuthSanity(
     OUT CHAR *ChlgText
 	);
 
-BOOLEAN APPeerProbeReqSanity(
-    IN PRTMP_ADAPTER pAd, 
-    IN VOID *Msg, 
-    IN ULONG MsgLen, 
-    OUT PUCHAR pAddr2,
-    OUT CHAR Ssid[], 
-    OUT UCHAR *SsidLen);
 
-BOOLEAN APPeerBeaconAndProbeRspSanity(
-    IN PRTMP_ADAPTER pAd, 
-    IN VOID *Msg, 
-    IN ULONG MsgLen, 
-    OUT PUCHAR pAddr2, 
-    OUT PUCHAR pBssid, 
-    OUT CHAR Ssid[], 
-    OUT UCHAR *SsidLen, 
-    OUT UCHAR *BssType, 
-    OUT USHORT *BeaconPeriod, 
-    OUT UCHAR *Channel, 
-    OUT LARGE_INTEGER *Timestamp, 
-    OUT USHORT *CapabilityInfo, 
-    OUT UCHAR Rate[], 
-    OUT UCHAR *RateLen,
-    OUT BOOLEAN *ExtendedRateIeExist,
-    OUT UCHAR *Erp);
-#if defined(RT30xx) || defined(RT305x)
+#ifdef DOT1X_SUPPORT
+/* ap_cfg.h */
+INT	Set_OwnIPAddr_Proc(
+	IN	PRTMP_ADAPTER	pAd, 
+	IN	PSTRING			arg);
+
+INT	Set_EAPIfName_Proc(
+	IN	PRTMP_ADAPTER	pAd, 
+	IN	PSTRING			arg);
+
+INT	Set_PreAuthIfName_Proc(
+	IN	PRTMP_ADAPTER	pAd, 
+	IN	PSTRING			arg);
+
+/* Define in ap.c */
+BOOLEAN DOT1X_InternalCmdAction(
+    IN  PRTMP_ADAPTER	pAd,
+    IN  MAC_TABLE_ENTRY *pEntry,
+    IN	UINT8			cmd);
+
+BOOLEAN DOT1X_EapTriggerAction(
+    IN  PRTMP_ADAPTER	pAd,
+    IN  MAC_TABLE_ENTRY *pEntry);
+#endif // DOT1X_SUPPORT //
+
+#ifdef DOT11_N_SUPPORT
+#ifdef GREENAP_SUPPORT
 VOID EnableAPMIMOPS(
     IN PRTMP_ADAPTER pAd);
 
 VOID DisableAPMIMOPS(
     IN PRTMP_ADAPTER pAd);
-#endif 
+#endif // GREENAP_SUPPORT //
+#endif // DOT11_N_SUPPORT //
 #endif  // __AP_H__
 

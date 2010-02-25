@@ -38,123 +38,6 @@
 #ifndef	__WPA_H__
 #define	__WPA_H__
 
-// EAPOL Key descripter frame format related length
-#define LEN_KEY_DESC_NONCE			32
-#define LEN_KEY_DESC_IV				16
-#define LEN_KEY_DESC_RSC			8
-#define LEN_KEY_DESC_ID				8
-#define LEN_KEY_DESC_REPLAY			8
-#define LEN_KEY_DESC_MIC			16
-
-// The length is the EAPoL-Key frame except key data field. 
-// Please refer to 802.11i-2004 ,Figure 43u in p.78
-#define LEN_EAPOL_KEY_MSG			(sizeof(KEY_DESCRIPTER) - MAX_LEN_OF_RSNIE)	
-
-// EAP Code Type.
-#define EAP_CODE_REQUEST	1
-#define EAP_CODE_RESPONSE	2
-#define EAP_CODE_SUCCESS    3
-#define EAP_CODE_FAILURE    4
-
-// EAPOL frame Protocol Version
-#define	EAPOL_VER					1
-#define	EAPOL_VER2					2
-
-// EAPOL-KEY Descriptor Type
-#define	WPA1_KEY_DESC				0xfe
-#define WPA2_KEY_DESC               0x02
-
-// Key Descriptor Version of Key Information
-#define	DESC_TYPE_TKIP				1
-#define	DESC_TYPE_AES				2
-
-#define LEN_MSG1_2WAY               0x7f
-#define MAX_LEN_OF_EAP_HS           256
-
-#define LEN_MASTER_KEY				32  
-
-// EAPOL EK, MK
-#define LEN_EAP_EK					16
-#define LEN_EAP_MICK				16
-#define LEN_EAP_KEY					((LEN_EAP_EK)+(LEN_EAP_MICK))
-// TKIP key related
-#define LEN_PMKID					16
-#define LEN_TKIP_EK					16
-#define LEN_TKIP_RXMICK				8
-#define LEN_TKIP_TXMICK				8
-#define LEN_AES_EK					16
-#define LEN_AES_KEY					LEN_AES_EK
-#define LEN_TKIP_KEY				((LEN_TKIP_EK)+(LEN_TKIP_RXMICK)+(LEN_TKIP_TXMICK))
-#define TKIP_AP_TXMICK_OFFSET		((LEN_EAP_KEY)+(LEN_TKIP_EK))
-#define TKIP_AP_RXMICK_OFFSET		(TKIP_AP_TXMICK_OFFSET+LEN_TKIP_TXMICK)
-#define TKIP_GTK_LENGTH				((LEN_TKIP_EK)+(LEN_TKIP_RXMICK)+(LEN_TKIP_TXMICK))
-#define LEN_PTK						((LEN_EAP_KEY)+(LEN_TKIP_KEY))
-#define MIN_LEN_OF_GTK				5
-#define LEN_PMK						32
-#define LEN_PMK_NAME				16
-#define LEN_NONCE					32
-
-// RSN IE Length definition
-#define MAX_LEN_OF_RSNIE         	255
-#define MIN_LEN_OF_RSNIE         	8
-
-#define KEY_LIFETIME				3600
-
-//EAP Packet Type
-#define	EAPPacket		0
-#define	EAPOLStart		1
-#define	EAPOLLogoff		2
-#define	EAPOLKey		3
-#define	EAPOLASFAlert	4
-#define	EAPTtypeMax		5
-
-#define	EAPOL_MSG_INVALID	0
-#define	EAPOL_PAIR_MSG_1	1
-#define	EAPOL_PAIR_MSG_2	2
-#define	EAPOL_PAIR_MSG_3	3
-#define	EAPOL_PAIR_MSG_4	4
-#define	EAPOL_GROUP_MSG_1	5
-#define	EAPOL_GROUP_MSG_2	6
-
-#define PAIRWISEKEY					1
-#define GROUPKEY					0
-
-// Retry timer counter initial value
-#define PEER_MSG1_RETRY_TIMER_CTR           0
-#define PEER_MSG3_RETRY_TIMER_CTR           10
-#define GROUP_MSG1_RETRY_TIMER_CTR          20
-
-// WPA mechanism retry timer interval
-#define PEER_MSG1_RETRY_EXEC_INTV           1000        		// 1 sec
-#define PEER_MSG3_RETRY_EXEC_INTV           3000        		// 3 sec
-#define GROUP_KEY_UPDATE_EXEC_INTV          1000				// 1 sec
-#define PEER_GROUP_KEY_UPDATE_INIV			2000				// 2 sec
-
-#define ENQUEUE_EAPOL_START_TIMER			200					// 200 ms
-
-// group rekey interval
-#define TIME_REKEY                          0
-#define PKT_REKEY                           1
-#define DISABLE_REKEY                       2
-#define MAX_REKEY                           2
-
-#define MAX_REKEY_INTER                     0x3ffffff
-
-#define GROUP_SUITE					0
-#define PAIRWISE_SUITE				1
-#define AKM_SUITE					2
-#define PMKID_LIST					3
-
-
-#define EAPOL_START_DISABLE					0
-#define EAPOL_START_PSK						1
-#define EAPOL_START_1X						2
-
-#define MIX_CIPHER_WPA_TKIP_ON(x)       (((x) & 0x08) != 0)
-#define MIX_CIPHER_WPA_AES_ON(x)        (((x) & 0x04) != 0)
-#define MIX_CIPHER_WPA2_TKIP_ON(x)      (((x) & 0x02) != 0)
-#define MIX_CIPHER_WPA2_AES_ON(x)       (((x) & 0x01) != 0)
-
 #ifndef ROUND_UP
 #define ROUND_UP(__x, __y) \
 	(((ULONG)((__x)+((__y)-1))) & ((ULONG)~((__y)-1)))
@@ -162,8 +45,8 @@
 
 #define	SET_UINT16_TO_ARRARY(_V, _LEN)		\
 {											\
-	_V[0] = (_LEN & 0xFF00) >> 8;			\
-	_V[1] = (_LEN & 0xFF);					\
+	_V[0] = ((UINT16)_LEN) >> 8;			\
+	_V[1] = ((UINT16)_LEN & 0xFF);					\
 }
 
 #define	INC_UINT16_TO_ARRARY(_V, _LEN)			\
@@ -179,7 +62,6 @@
 
 #define	CONV_ARRARY_TO_UINT16(_V)	((_V[0]<<8) | (_V[1]))
 
-
 #define	ADD_ONE_To_64BIT_VAR(_V)		\
 {										\
 	UCHAR	cnt = LEN_KEY_DESC_REPLAY;	\
@@ -192,219 +74,152 @@
 	}while (_V[cnt] == 0);				\
 }
 
+#define INC_TX_TSC(_tsc, _cnt)                          \
+{                                                       \
+    INT i=0;                                            \
+	while (++_tsc[i] == 0x0)                            \
+    {                                                   \
+        i++;                                            \
+		if (i == (_cnt))                                \
+			break;                                      \
+	}                                                   \
+}
+
 #define IS_WPA_CAPABILITY(a)       (((a) >= Ndis802_11AuthModeWPA) && ((a) <= Ndis802_11AuthModeWPA1PSKWPA2PSK))
 
-// EAPOL Key Information definition within Key descriptor format
-typedef	struct PACKED _KEY_INFO
-{
-#ifdef RT_BIG_ENDIAN
-	UCHAR	KeyAck:1;
-    UCHAR	Install:1;
-    UCHAR	KeyIndex:2;
-    UCHAR	KeyType:1;
-    UCHAR	KeyDescVer:3;
-    UCHAR	Rsvd:3;
-    UCHAR	EKD_DL:1;		// EKD for AP; DL for STA
-    UCHAR	Request:1;
-    UCHAR	Error:1;
-    UCHAR	Secure:1;
-    UCHAR	KeyMic:1;
+/* 	
+	WFA recommend to restrict the encryption type in 11n-HT mode.
+ 	So, the WEP and TKIP shall not be allowed to use HT rate. 
+ */
+#define IS_INVALID_HT_SECURITY(_mode)		\
+	(((_mode) == Ndis802_11Encryption1Enabled) || \
+	 ((_mode) == Ndis802_11Encryption2Enabled) || \
+	 ((_mode) == Ndis802_11Encryption4Enabled))
+
+#define MIX_CIPHER_WPA_TKIP_ON(x)       (((x) & 0x08) != 0)
+#define MIX_CIPHER_WPA_AES_ON(x)        (((x) & 0x04) != 0)
+#define MIX_CIPHER_WPA2_TKIP_ON(x)      (((x) & 0x02) != 0)
+#define MIX_CIPHER_WPA2_AES_ON(x)       (((x) & 0x01) != 0)
+
+/* Some definition are different between Keneral mode and Daemon mode */
+#ifdef WPA_DAEMON_MODE
+/* The definition for Daemon mode */
+#define WPA_GET_BSS_NUM(_pAd)		(_pAd)->mbss_num
+
+#define WPA_GET_PMK(_pAd, _pEntry, _pmk)					\
+{															\
+	_pmk = _pAd->MBSS[_pEntry->apidx].PMK;					\
+}
+
+#define WPA_GET_GTK(_pAd, _pEntry, _gtk)					\
+{															\
+	_gtk = _pAd->MBSS[_pEntry->apidx].GTK;					\
+}
+
+#define WPA_GET_GROUP_CIPHER(_pAd, _pEntry, _cipher)		\
+{															\
+	_cipher = (_pAd)->MBSS[_pEntry->apidx].GroupEncrypType;	\
+}
+
+#define WPA_GET_DEFAULT_KEY_ID(_pAd, _pEntry, _idx)			\
+{															\
+	_idx = (_pAd)->MBSS[_pEntry->apidx].DefaultKeyId;		\
+}
+
+#define WPA_GET_BMCST_TSC(_pAd, _pEntry, _tsc)				\
+{															\
+	_tsc = 1;												\
+}
+
+#define WPA_BSSID(_pAd, _apidx)		(_pAd)->MBSS[_apidx].wlan_addr
+
+#define WPA_OS_MALLOC(_p, _s)		\
+{									\
+	_p = os_malloc(_s);			\
+}
+
+#define WPA_OS_FREE(_p)		\
+{								\
+	os_free(_p);				\
+}
+
+#define WPA_GET_CURRENT_TIME(_time)		\
+{										\
+	struct timeval tv;					\
+	gettimeofday(&tv, NULL);			\
+	*(_time) = tv.tv_sec;					\
+}
+
 #else
-	UCHAR	KeyMic:1;
-	UCHAR	Secure:1;
-	UCHAR	Error:1;
-	UCHAR	Request:1;
-	UCHAR	EKD_DL:1;       // EKD for AP; DL for STA
-	UCHAR	Rsvd:3;
-	UCHAR	KeyDescVer:3;
-	UCHAR	KeyType:1;
-	UCHAR	KeyIndex:2;
-	UCHAR	Install:1;
-	UCHAR	KeyAck:1;
-#endif	
-}	KEY_INFO, *PKEY_INFO;
+/* The definition for Driver mode */
 
-// EAPOL Key descriptor format
-typedef	struct PACKED _KEY_DESCRIPTER
-{
-	UCHAR		Type;
-	KEY_INFO	KeyInfo;
-	UCHAR		KeyLength[2];
-	UCHAR		ReplayCounter[LEN_KEY_DESC_REPLAY];
-	UCHAR		KeyNonce[LEN_KEY_DESC_NONCE];
-	UCHAR		KeyIv[LEN_KEY_DESC_IV];
-	UCHAR		KeyRsc[LEN_KEY_DESC_RSC];
-	UCHAR		KeyId[LEN_KEY_DESC_ID];
-	UCHAR		KeyMic[LEN_KEY_DESC_MIC];
-	UCHAR		KeyDataLen[2];	   
-	UCHAR		KeyData[MAX_LEN_OF_RSNIE];
-}	KEY_DESCRIPTER, *PKEY_DESCRIPTER;
+#if defined(CONFIG_AP_SUPPORT) && defined(CONFIG_STA_SUPPORT)
+#define WPA_GET_BSS_NUM(_pAd)		(((_pAd)->OpMode == OPMODE_AP) ? (_pAd)->ApCfg.BssidNum : 1)
+#define WPA_GET_GROUP_CIPHER(_pAd, _pEntry, _cipher)					\
+	{																	\
+	_cipher = Ndis802_11WEPDisabled;								\
+		if ((_pAd)->OpMode == OPMODE_AP)								\
+		{																\
+		if (IS_ENTRY_APCLI(_pEntry) && 								\
+			((_pEntry)->MatchAPCLITabIdx < MAX_APCLI_NUM))			\
+			_cipher = (_pAd)->ApCfg.ApCliTab[(_pEntry)->MatchAPCLITabIdx].GroupCipher;	\
+			else if ((_pEntry)->apidx < (_pAd)->ApCfg.BssidNum)			\
+				_cipher = (_pAd)->ApCfg.MBSSID[_pEntry->apidx].GroupKeyWepStatus;\
+		}																\
+		else															\
+			_cipher = (_pAd)->StaCfg.GroupCipher;						\
+	}
 
-typedef	struct PACKED _EAPOL_PACKET
-{
-	UCHAR	 			ProVer;
-	UCHAR	 			ProType;
-	UCHAR	 			Body_Len[2];
-	KEY_DESCRIPTER		KeyDesc;
-}	EAPOL_PACKET, *PEAPOL_PACKET;
+#define WPA_BSSID(_pAd, _apidx) 	(((_pAd)->OpMode == OPMODE_AP) ?\
+									(_pAd)->ApCfg.MBSSID[_apidx].Bssid :\
+									(_pAd)->CommonCfg.Bssid)
+#elif defined(CONFIG_AP_SUPPORT)
+#define WPA_GET_BSS_NUM(_pAd)		(_pAd)->ApCfg.BssidNum
+#define WPA_GET_GROUP_CIPHER(_pAd, _pEntry, _cipher)				\
+	{																\
+	_cipher = Ndis802_11WEPDisabled;							\
+	if (IS_ENTRY_APCLI(_pEntry) && 								\
+		((_pEntry)->MatchAPCLITabIdx < MAX_APCLI_NUM))			\
+		_cipher = (_pAd)->ApCfg.ApCliTab[(_pEntry)->MatchAPCLITabIdx].GroupCipher;	\
+		else if ((_pEntry)->apidx < (_pAd)->ApCfg.BssidNum)			\
+			_cipher = (_pAd)->ApCfg.MBSSID[_pEntry->apidx].GroupKeyWepStatus;\
+	}
 
-//802.11i D10 page 83
-typedef struct PACKED _GTK_ENCAP
-{
-#ifndef RT_BIG_ENDIAN
-    UCHAR               Kid:2;
-    UCHAR               tx:1;
-    UCHAR               rsv:5;
-    UCHAR               rsv1;
-#else
-    UCHAR               rsv:5;
-    UCHAR               tx:1;
-    UCHAR               Kid:2;
-    UCHAR               rsv1;    	
-#endif
-    UCHAR               GTK[TKIP_GTK_LENGTH];
-}   GTK_ENCAP, *PGTK_ENCAP;
+#define WPA_BSSID(_pAd, _apidx) 	(_pAd)->ApCfg.MBSSID[_apidx].Bssid
 
-typedef struct PACKED _KDE_ENCAP
-{
-    UCHAR               Type;
-    UCHAR               Len;
-    UCHAR               OUI[3];
-    UCHAR               DataType;
-    GTK_ENCAP      GTKEncap;
-}   KDE_ENCAP, *PKDE_ENCAP;
+#elif defined(CONFIG_STA_SUPPORT)
+#define WPA_GET_BSS_NUM(_pAd)		1
+#define WPA_GET_GROUP_CIPHER(_pAd, _pEntry, _cipher)				\
+	{																\
+		_cipher = (_pAd)->StaCfg.GroupCipher;						\
+	}
+#define WPA_BSSID(_pAd, _apidx) 	(_pAd)->CommonCfg.Bssid
+#endif // defined(CONFIG_STA_SUPPORT) //
 
-// For WPA1
-typedef struct PACKED _RSNIE {
-    UCHAR   oui[4];
-    USHORT  version;
-    UCHAR   mcast[4];
-    USHORT  ucount;
-    struct PACKED {
-        UCHAR oui[4];
-    }ucast[1];
-} RSNIE, *PRSNIE;
 
-// For WPA2
-typedef struct PACKED _RSNIE2 {
-    USHORT  version;
-    UCHAR   mcast[4];
-    USHORT  ucount;
-    struct PACKED {
-        UCHAR oui[4];
-    }ucast[1];
-} RSNIE2, *PRSNIE2;
+#define WPA_OS_MALLOC(_p, _s)		\
+{									\
+	os_alloc_mem(NULL, (PUCHAR *)&_p, _s);		\
+}
 
-// AKM Suite
-typedef struct PACKED _RSNIE_AUTH {
-    USHORT acount;
-    struct PACKED {
-        UCHAR oui[4];
-    }auth[1];
-} RSNIE_AUTH,*PRSNIE_AUTH;
+#define WPA_OS_FREE(_p)		\
+{							\
+	os_free_mem(NULL, _p);	\
+}
 
-typedef	union PACKED _RSN_CAPABILITIES	{
-	struct	PACKED {
-#ifdef RT_BIG_ENDIAN
-        USHORT		Rsvd:10;
-        USHORT		GTKSA_R_Counter:2;
-        USHORT		PTKSA_R_Counter:2;
-        USHORT		No_Pairwise:1;
-		USHORT		PreAuth:1;
-#else
-        USHORT		PreAuth:1;
-		USHORT		No_Pairwise:1;
-		USHORT		PTKSA_R_Counter:2;
-		USHORT		GTKSA_R_Counter:2;
-		USHORT		Rsvd:10;
-#endif
-	}	field;
-	USHORT			word;
-}	RSN_CAPABILITIES, *PRSN_CAPABILITIES;
+#define WPA_GET_CURRENT_TIME(_time)		NdisGetSystemUpTime(_time);
 
-typedef struct PACKED _EAP_HDR {
-    UCHAR   ProVer;
-    UCHAR   ProType;
-    UCHAR   Body_Len[2];
-    UCHAR   code;
-    UCHAR   identifier;
-    UCHAR   length[2]; // including code and identifier, followed by length-2 octets of data
-} EAP_HDR, *PEAP_HDR;
-
-// For supplicant state machine states. 802.11i Draft 4.1, p. 97
-// We simplified it
-typedef	enum	_WpaState
-{
-	SS_NOTUSE,				// 0
-	SS_START,				// 1
-	SS_WAIT_MSG_3,			// 2
-	SS_WAIT_GROUP,			// 3
-	SS_FINISH,  			// 4
-	SS_KEYUPDATE,			// 5
-}	WPA_STATE;
-
-// 
-//	The definition of the cipher combination
-//
-// 	 bit3	bit2  bit1   bit0
-//	+------------+------------+ 
-// 	|	  WPA	 |	   WPA2   |
-//	+------+-----+------+-----+
-//	| TKIP | AES | TKIP | AES |
-//	|	0  |  1  |   1  |  0  | -> 0x06
-//	|	0  |  1  |   1  |  1  | -> 0x07
-//	|	1  |  0  |   0  |  1  | -> 0x09
-//	|	1  |  0  |   1  |  1  | -> 0x0B
-//	|	1  |  1  |   0  |  1  | -> 0x0D
-//	|	1  |  1  |   1  |  0  | -> 0x0E									
-//	|	1  |  1  |   1  |  1  |	-> 0x0F																												
-//	+------+-----+------+-----+	
-//
-typedef	enum	_WpaMixPairCipher
-{
-	MIX_CIPHER_NOTUSE 			= 0x00,	
-	WPA_NONE_WPA2_TKIPAES		= 0x03,		// WPA2-TKIPAES
-	WPA_AES_WPA2_TKIP 			= 0x06,				
-	WPA_AES_WPA2_TKIPAES		= 0x07,			
-	WPA_TKIP_WPA2_AES			= 0x09,			
-	WPA_TKIP_WPA2_TKIPAES		= 0x0B,  	
-	WPA_TKIPAES_WPA2_NONE		= 0x0C,		// WPA-TKIPAES
-	WPA_TKIPAES_WPA2_AES		= 0x0D,
-	WPA_TKIPAES_WPA2_TKIP		= 0x0E,  			
-	WPA_TKIPAES_WPA2_TKIPAES	= 0x0F,	
-}	WPA_MIX_PAIR_CIPHER;
-
-typedef struct PACKED _RSN_IE_HEADER_STRUCT	{
-	UCHAR		Eid;
-	UCHAR		Length;
-	USHORT		Version;	// Little endian format
-}	RSN_IE_HEADER_STRUCT, *PRSN_IE_HEADER_STRUCT;
-
-// Cipher suite selector types
-typedef struct PACKED _CIPHER_SUITE_STRUCT	{
-	UCHAR		Oui[3];
-	UCHAR		Type;
-}	CIPHER_SUITE_STRUCT, *PCIPHER_SUITE_STRUCT;
-
-// Authentication and Key Management suite selector
-typedef struct PACKED _AKM_SUITE_STRUCT	{
-	UCHAR		Oui[3];
-	UCHAR		Type;
-}	AKM_SUITE_STRUCT, *PAKM_SUITE_STRUCT;
-
-// RSN capability
-typedef struct	PACKED _RSN_CAPABILITY	{
-	USHORT		Rsv:10;
-	USHORT		GTKSAReplayCnt:2;
-	USHORT		PTKSAReplayCnt:2;
-	USHORT		NoPairwise:1;
-	USHORT		PreAuth:1;
-}	RSN_CAPABILITY, *PRSN_CAPABILITY;
+#endif // End of Driver Mode //
 
 
 /*========================================
 	The prototype is defined in cmm_wpa.c
   ========================================*/
+void inc_iv_byte(
+	UCHAR *iv, 
+	UINT len, 
+	UINT cnt);
+
 BOOLEAN WpaMsgTypeSubst(
 	IN  UCHAR   EAPType,
 	OUT INT		*MsgType);
@@ -419,13 +234,23 @@ VOID    PRF(
 	OUT UCHAR   *output,
 	IN  INT     len);
 
-int PasswordHash(
+int RtmpPasswordHash(
 	char *password, 
 	unsigned char *ssid, 
 	int ssidlength, 
 	unsigned char *output);
 
-PUINT8	GetSuiteFromRSNIE(
+VOID	KDF(
+	IN	PUINT8	key,
+	IN	INT		key_len,
+	IN	PUINT8	label,
+	IN	INT		label_len,
+	IN	PUINT8	data,
+	IN	INT		data_len,
+	OUT	PUINT8	output,
+	IN	USHORT	len);
+
+PUINT8	WPA_ExtractSuiteFromRSNIE(
 		IN 	PUINT8	rsnie,
 		IN 	UINT	rsnie_len,
 		IN	UINT8	type,
@@ -443,5 +268,231 @@ VOID RTMPInsertRSNIE(
 	IN PUINT8 pmkid_ptr,
 	IN UINT8  pmkid_len);
 
+/* 
+ =====================================	
+ 	function prototype in cmm_wpa.c
+ =====================================	
+*/
+VOID	RTMPToWirelessSta(
+    IN  PRTMP_ADAPTER   	pAd,
+    IN  PMAC_TABLE_ENTRY 	pEntry,
+    IN  PUCHAR          	pHeader802_3,
+    IN  UINT            	HdrLen,
+    IN  PUCHAR          	pData,
+    IN  UINT            	DataLen,
+    IN	BOOLEAN				bClearFrame);
+
+VOID WpaDerivePTK(
+	IN  PRTMP_ADAPTER   pAd,
+	IN  UCHAR   *PMK,
+	IN  UCHAR   *ANonce,
+	IN  UCHAR   *AA,
+	IN  UCHAR   *SNonce,
+	IN  UCHAR   *SA,
+	OUT UCHAR   *output,
+	IN  UINT    len);
+
+VOID WpaDeriveGTK(
+	IN  UCHAR   *PMK,
+	IN  UCHAR   *GNonce,
+	IN  UCHAR   *AA,
+	OUT UCHAR   *output,
+	IN  UINT    len);
+
+VOID    GenRandom(
+	IN  PRTMP_ADAPTER   pAd, 
+	IN	UCHAR			*macAddr,
+	OUT	UCHAR			*random);
+
+BOOLEAN RTMPCheckWPAframe(
+	IN PRTMP_ADAPTER pAd,
+	IN PMAC_TABLE_ENTRY	pEntry,
+	IN PUCHAR 			pData,
+	IN ULONG 			DataByteCount,	
+	IN UCHAR			FromWhichBSSID);
+
+BOOLEAN RTMPParseEapolKeyData(
+	IN  PRTMP_ADAPTER   pAd,
+	IN  PUCHAR          pKeyData,
+	IN  UCHAR           KeyDataLen,
+	IN	UCHAR			GroupKeyIndex,
+	IN	UCHAR			MsgType,
+	IN	BOOLEAN			bWPA2,
+	IN  MAC_TABLE_ENTRY *pEntry);
+
+VOID WPA_ConstructKdeHdr(
+	IN 	UINT8	data_type,	
+	IN 	UINT8 	data_len,
+	OUT PUCHAR 	pBuf);
+
+VOID	ConstructEapolMsg(
+	IN 	PMAC_TABLE_ENTRY	pEntry,
+    IN 	UCHAR				GroupKeyWepStatus,
+    IN 	UCHAR				MsgType,  
+    IN	UCHAR				DefaultKeyIdx,
+	IN 	UCHAR				*KeyNonce,
+	IN	UCHAR				*TxRSC,
+	IN	UCHAR				*GTK,
+	IN	UCHAR				*RSNIE,
+	IN	UCHAR				RSNIE_Len,
+    OUT PEAPOL_PACKET       pMsg);
+
+PCIPHER_KEY RTMPSwCipherKeySelection(
+	IN 	PRTMP_ADAPTER 		pAd,
+	IN	PUCHAR				pIV,
+	IN	RX_BLK				*pRxBlk,
+	IN	PMAC_TABLE_ENTRY 	pEntry);
+
+NDIS_STATUS	RTMPSoftDecryptionAction(
+	IN 		PRTMP_ADAPTER 	pAd,
+	IN 		PUCHAR			pHdr,
+	IN 		UCHAR    		UserPriority,
+	IN 		PCIPHER_KEY		pKey,
+	INOUT 	PUCHAR			pData,
+	INOUT 	UINT16			*DataByteCnt);
+
+VOID RTMPSoftConstructIVHdr(
+	IN	UCHAR			CipherAlg,
+	IN	UCHAR			key_id,
+	IN	PUCHAR			pTxIv,
+	OUT PUCHAR 			pHdrIv,
+	OUT	UINT8			*hdr_iv_len);
+
+VOID RTMPSoftEncryptionAction(
+	IN	PRTMP_ADAPTER	pAd,
+	IN	UCHAR			CipherAlg,
+	IN	PUCHAR			pHdr,
+	IN	PUCHAR			pSrcBufData,
+	IN	UINT32			SrcBufLen,
+	IN	UCHAR			KeyIdx,
+	IN	PCIPHER_KEY		pKey,
+	OUT	UINT8			*ext_len);
+
+VOID RTMPMakeRSNIE(
+	IN  PRTMP_ADAPTER   pAd,
+	IN  UINT            AuthMode,
+	IN  UINT            WepStatus,
+	IN	UCHAR			apidx);
+
+VOID WPAInstallPairwiseKey(
+	PRTMP_ADAPTER		pAd,
+	UINT8				BssIdx,
+	PMAC_TABLE_ENTRY	pEntry,
+	BOOLEAN				bAE);
+
+VOID WPAInstallSharedKey(
+	PRTMP_ADAPTER		pAd,
+	UINT8				GroupCipher,
+	UINT8				BssIdx,
+	UINT8				KeyIdx,
+	UINT8				Wcid,
+	BOOLEAN				bAE,
+	PUINT8				pGtk);
+
+VOID RTMPSetWcidSecurityInfo(
+	PRTMP_ADAPTER		pAd,
+	UINT8				BssIdx,
+	UINT8				KeyIdx,
+	UINT8				CipherAlg,
+	UINT8				Wcid,
+	UINT8				KeyTabFlag);
+
+VOID	CalculateMIC(
+	IN	UCHAR			KeyDescVer,	
+	IN	UCHAR			*PTK,
+	OUT PEAPOL_PACKET   pMsg);
+
+PSTRING GetEapolMsgType(CHAR msg);
+
+/* 
+ =====================================	
+ 	function prototype in cmm_wep.c
+ =====================================	
+*/
+UINT RTMP_CALC_FCS32(
+	IN  UINT   Fcs,
+	IN  PUCHAR  Cp,
+	IN  INT     Len);
+
+VOID RTMPConstructWEPIVHdr(
+	IN	UINT8 			key_idx,
+	IN	UCHAR			*pn,	
+	OUT	UCHAR			*iv_hdr);
+
+BOOLEAN	RTMPSoftEncryptWEP(
+	IN 		PRTMP_ADAPTER 	pAd,
+	IN 		PUCHAR			pIvHdr,
+	IN 		PCIPHER_KEY		pKey,
+	INOUT 	PUCHAR			pData,
+	IN 		ULONG			DataByteCnt);
+
+BOOLEAN	RTMPSoftDecryptWEP(
+	IN 		PRTMP_ADAPTER 	pAd,
+	IN 		PCIPHER_KEY		pKey,
+	INOUT 	PUCHAR			pData,
+	INOUT 	UINT16			*DataByteCnt);
+
+/* 
+ =====================================	
+ 	function prototype in cmm_tkip.c
+ =====================================	
+*/
+BOOLEAN RTMPSoftDecryptTKIP(
+	IN 		PRTMP_ADAPTER 	pAd,
+	IN 		PUCHAR			pHdr,
+	IN 		UCHAR    		UserPriority,
+	IN 		PCIPHER_KEY		pKey,
+	INOUT 	PUCHAR			pData,
+	IN 		UINT16			*DataByteCnt);
+
+VOID TKIP_GTK_KEY_WRAP( 
+    IN UCHAR    *key,
+    IN UCHAR	*iv,
+    IN UCHAR    *input_text,
+    IN UINT32    input_len,
+    OUT UCHAR   *output_text);
+
+VOID TKIP_GTK_KEY_UNWRAP( 
+    IN UCHAR    *key,
+    IN UCHAR	*iv,
+    IN UCHAR    *input_text,
+    IN UINT32    input_len,
+    OUT UCHAR   *output_text);
+
+/* 
+ =====================================	
+ 	function prototype in cmm_aes.c
+ =====================================	
+*/
+BOOLEAN RTMPSoftDecryptAES(
+	IN PRTMP_ADAPTER pAd,
+	IN PUCHAR	pData,
+	IN ULONG	DataByteCnt, 
+	IN PCIPHER_KEY	pWpaKey);
+
+VOID RTMPConstructCCMPHdr(
+	IN	UINT8 			key_idx,
+	IN	UCHAR			*pn,		
+	OUT	UCHAR			*ccmp_hdr);
+
+BOOLEAN RTMPSoftEncryptCCMP(
+	IN  PRTMP_ADAPTER   pAd,
+	IN 	PUCHAR			pHdr,
+	IN	PUCHAR			pIV,
+	IN 	PUCHAR			pKey,
+	INOUT PUCHAR		pData,
+	IN 	UINT32			DataLen);
+
+BOOLEAN RTMPSoftDecryptCCMP(
+	IN 		PRTMP_ADAPTER 	pAd,
+	IN 		PUCHAR			pHdr,
+	IN 		PCIPHER_KEY		pKey,
+	INOUT 	PUCHAR			pData,
+	INOUT 	UINT16			*DataLen);
+
+VOID CCMP_test_vector(
+	IN 	PRTMP_ADAPTER 	pAd,
+	IN	INT 			input);
 
 #endif
+

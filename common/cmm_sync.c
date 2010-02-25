@@ -73,6 +73,12 @@ UCHAR A_BAND_REGION_12_CHANNEL_LIST[]={36, 40, 44, 48, 52, 56, 60, 64, 100, 104,
 UCHAR A_BAND_REGION_13_CHANNEL_LIST[]={52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 149, 153, 157, 161};
 UCHAR A_BAND_REGION_14_CHANNEL_LIST[]={36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 136, 140, 149, 153, 157, 161, 165};
 UCHAR A_BAND_REGION_15_CHANNEL_LIST[]={149, 153, 157, 161, 165, 169, 173};
+UCHAR A_BAND_REGION_16_CHANNEL_LIST[]={52, 56, 60, 64, 149, 153, 157, 161, 165};
+UCHAR A_BAND_REGION_17_CHANNEL_LIST[]={36, 40, 44, 48, 149, 153, 157, 161};
+UCHAR A_BAND_REGION_18_CHANNEL_LIST[]={36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 132, 136, 140};
+UCHAR A_BAND_REGION_19_CHANNEL_LIST[]={56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 149, 153, 157, 161};
+UCHAR A_BAND_REGION_20_CHANNEL_LIST[]={36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 149, 153, 157, 161};
+UCHAR A_BAND_REGION_21_CHANNEL_LIST[]={36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 149, 153, 157, 161};
 
 
 //BaSizeArray follows the 802.11n definition as MaxRxFactor.  2^(13+factor) bytes. When factor =0, it's about Ba buffer size =8.
@@ -223,6 +229,10 @@ VOID BuildChannelList(
 				num = sizeof(A_BAND_REGION_15_CHANNEL_LIST)/sizeof(UCHAR);
 				pChannelList = A_BAND_REGION_15_CHANNEL_LIST;
 				break;
+			case REGION_16_A_BAND:
+				num = sizeof(A_BAND_REGION_16_CHANNEL_LIST)/sizeof(UCHAR);
+				pChannelList = A_BAND_REGION_16_CHANNEL_LIST;
+				break;
 			default:            // Error. should never happen
 				DBGPRINT(RT_DEBUG_WARN,("countryregion=%d not support", pAd->CommonCfg.CountryRegionForABand));
 				break;
@@ -298,10 +308,28 @@ UCHAR NextChannel(
 	UCHAR next_channel = 0;
 			
 	for (i = 0; i < (pAd->ChannelListNum - 1); i++)
+	{
 		if (channel == pAd->ChannelList[i].Channel)
 		{
+#ifdef DOT11_N_SUPPORT
+#ifdef DOT11N_DRAFT3
+			// Only scan effected channel if this is a SCAN_2040_BSS_COEXIST
+			// 2009 PF#2: Nee to handle the second channel of AP fall into affected channel range.
+			if ((pAd->MlmeAux.ScanType == SCAN_2040_BSS_COEXIST) && (pAd->ChannelList[i+1].Channel >14))
+			{
+				channel = pAd->ChannelList[i+1].Channel;
+				continue;
+			}
+			else
+#endif // DOT11N_DRAFT3 //
+#endif // DOT11_N_SUPPORT //
+			{
+				// Record this channel's idx in ChannelList array.
 			next_channel = pAd->ChannelList[i+1].Channel;
 			break;
+	}
+		}
+		
 	}
 	return next_channel;
 }
@@ -387,6 +415,7 @@ CHAR	ConvertToRssi(
     return (-12 - RssiOffset - LNAGain - Rssi);
 }
 
+#if defined(AP_SCAN_SUPPORT) || defined(CONFIG_STA_SUPPORT)
 /*
 	==========================================================================
 	Description:
@@ -406,6 +435,7 @@ VOID ScanNextChannel(
 	PHEADER_802_11  pHdr80211;
 #endif // CONFIG_STA_SUPPORT //
 	UINT			ScanTimeIn5gChannel = SHORT_CHANNEL_TIME;
+	BOOLEAN			ScanPending = FALSE;
 
 #ifdef CONFIG_STA_SUPPORT
 	IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
@@ -413,6 +443,8 @@ VOID ScanNextChannel(
 		if (MONITOR_ON(pAd))
 			return;
 	}
+
+	ScanPending = ((pAd->StaCfg.bImprovedScan) && (pAd->StaCfg.ScanChannelCnt>=7));
 #endif // CONFIG_STA_SUPPORT //
 
 #ifdef RALINK_ATE
@@ -421,11 +453,11 @@ VOID ScanNextChannel(
 		return;
 #endif // RALINK_ATE //
 
-	if (pAd->MlmeAux.Channel == 0) 
+	if ((pAd->MlmeAux.Channel == 0) || ScanPending) 
 	{
 		if ((pAd->CommonCfg.BBPCurrentBW == BW_40)
 #ifdef CONFIG_STA_SUPPORT
-			&& (INFRA_ON(pAd)
+			&& (INFRA_ON(pAd) || ADHOC_ON(pAd)
 				|| (pAd->OpMode == OPMODE_AP))
 #endif // CONFIG_STA_SUPPORT //
 			)
@@ -448,6 +480,19 @@ VOID ScanNextChannel(
 #ifdef CONFIG_STA_SUPPORT
 		IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
 		{
+
+			/*
+				If all peer Ad-hoc clients leave, driver would do LinkDown and LinkUp.
+				In LinkUp, CommonCfg.Ssid would copy SSID from MlmeAux. 
+				To prevent SSID is zero or wrong in Beacon, need to recover MlmeAux.SSID here.
+			*/
+			if (ADHOC_ON(pAd))
+			{
+				NdisZeroMemory(pAd->MlmeAux.Ssid, MAX_LEN_OF_SSID);
+				pAd->MlmeAux.SsidLen = pAd->CommonCfg.SsidLen;
+				NdisMoveMemory(pAd->MlmeAux.Ssid, pAd->CommonCfg.Ssid, pAd->CommonCfg.SsidLen);
+			}
+		
 			//
 			// To prevent data lost.
 			// Send an NULL data with turned PSM bit on to current associated AP before SCAN progress.
@@ -466,28 +511,49 @@ VOID ScanNextChannel(
 
 					// Send using priority queue
 					MiniportMMRequest(pAd, 0, pOutBuffer, sizeof(HEADER_802_11));
-					DBGPRINT(RT_DEBUG_TRACE, ("MlmeScanReqAction -- Send PSM Data frame\n"));
+					DBGPRINT(RT_DEBUG_TRACE, ("%s -- Send PSM Data frame\n", __FUNCTION__));
 					MlmeFreeMemory(pAd, pOutBuffer);
 					RTMPusecDelay(5000);
 				}
 			}
 
-			pAd->Mlme.SyncMachine.CurrState = SYNC_IDLE;
-			Status = MLME_SUCCESS;
-			MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_SCAN_CONF, 2, &Status);
+			// keep the latest scan channel, could be 0 for scan complete, or other channel
+			pAd->StaCfg.LastScanChannel = pAd->MlmeAux.Channel;
+
+			pAd->StaCfg.ScanChannelCnt = 0;
+
+			// Suspend scanning and Resume TxData for Fast Scanning
+			if ((pAd->MlmeAux.Channel != 0)	&& 
+				(pAd->StaCfg.bImprovedScan))// it is scan pending
+			{
+				pAd->Mlme.SyncMachine.CurrState = SCAN_PENDING;
+				Status = MLME_SUCCESS;
+				DBGPRINT(RT_DEBUG_WARN, ("bFastRoamingScan ~~~~~~~~~~~~~ Get back to send data ~~~~~~~~~~~~~\n"));
+
+				RTMPResumeMsduTransmission(pAd);
+			}
+			else
+			{
+				pAd->StaCfg.BssNr = pAd->ScanTab.BssNr;
+				pAd->StaCfg.bImprovedScan = FALSE;
+				
+				pAd->Mlme.SyncMachine.CurrState = SYNC_IDLE;
+				Status = MLME_SUCCESS;
+				MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_SCAN_CONF, 2, &Status, 0);
 
 				RTMPSendWirelessEvent(pAd, IW_SCAN_COMPLETED_EVENT_FLAG, NULL, BSS0, 0);
+			}
 
 #ifdef LINUX
 #ifdef RT_CFG80211_SUPPORT
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_SCAN_END, NULL, 0);
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_SCAN_END, NULL, 0);
 #endif // RT_CFG80211_SUPPORT //
 #endif // LINUX //
 		}
 #endif // CONFIG_STA_SUPPORT //
 
 
-		RTMP_CLEAR_FLAG(pAd, fRTMP_ADAPTER_BSS_SCAN_IN_PROGRESS);
+
 	} 
 #ifdef RTMP_MAC_USB
 #ifdef CONFIG_STA_SUPPORT
@@ -541,7 +607,10 @@ VOID ScanNextChannel(
 #endif // CONFIG_STA_SUPPORT //
 
 		//Global country domain(ch1-11:active scan, ch12-14 passive scan)
-		if ((pAd->MlmeAux.Channel <= 14) && (pAd->MlmeAux.Channel >= 12) && ((pAd->CommonCfg.CountryRegion & 0x7f) == REGION_31_BG_BAND))
+		if (((pAd->MlmeAux.Channel <= 14) &&
+			(pAd->MlmeAux.Channel >= 12) &&
+			((pAd->CommonCfg.CountryRegion & 0x7f) == REGION_31_BG_BAND)) ||
+			(CHAN_PropertyCheck(pAd, pAd->MlmeAux.Channel, CHANNEL_PASSIVE_SCAN) == TRUE))
 		{
 			ScanType = SCAN_PASSIVE;
 		}
@@ -552,6 +621,9 @@ VOID ScanNextChannel(
 			RTMPSetTimer(&pAd->MlmeAux.ScanTimer, FAST_ACTIVE_SCAN_TIME);
 		else // must be SCAN_PASSIVE or SCAN_ACTIVE
 		{
+#ifdef CONFIG_STA_SUPPORT
+			pAd->StaCfg.ScanChannelCnt++;
+#endif // CONFIG_STA_SUPPORT //
 			if ((pAd->CommonCfg.PhyMode == PHY_11ABG_MIXED) 
 #ifdef DOT11_N_SUPPORT
 				|| (pAd->CommonCfg.PhyMode == PHY_11ABGN_MIXED) || (pAd->CommonCfg.PhyMode == PHY_11AGN_MIXED)
@@ -569,6 +641,11 @@ VOID ScanNextChannel(
 
 		if ((ScanType == SCAN_ACTIVE)
 			|| (ScanType == FAST_SCAN_ACTIVE)
+#ifdef DOT11_N_SUPPORT
+#ifdef DOT11N_DRAFT3
+			|| (ScanType == SCAN_2040_BSS_COEXIST)
+#endif // DOT11N_DRAFT3 //
+#endif // DOT11_N_SUPPORT //
 			)
 		{
 			NStatus = MlmeAllocateMemory(pAd, &pOutBuffer);  //Get an unused nonpaged memory
@@ -580,13 +657,22 @@ VOID ScanNextChannel(
 				{
 					pAd->Mlme.SyncMachine.CurrState = SYNC_IDLE;
 					Status = MLME_FAIL_NO_RESOURCE;
-					MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_SCAN_CONF, 2, &Status);
+					MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_SCAN_CONF, 2, &Status, 0);
 				}
 #endif // CONFIG_STA_SUPPORT //
 
 				return;
 			}
 
+#ifdef DOT11_N_SUPPORT
+#ifdef DOT11N_DRAFT3
+			if (ScanType == SCAN_2040_BSS_COEXIST)
+			{
+				DBGPRINT(RT_DEBUG_TRACE, ("SYNC - SCAN_2040_BSS_COEXIST !! Prepare to send Probe Request\n"));
+			}
+#endif // DOT11N_DRAFT3 //
+#endif // DOT11_N_SUPPORT //
+			
 			// There is no need to send broadcast probe request if active scan is in effect.
 			if ((ScanType == SCAN_ACTIVE) || (ScanType == FAST_SCAN_ACTIVE)
 				)
@@ -697,7 +783,7 @@ VOID ScanNextChannel(
 				FrameLen += Tmp;
 
 #ifdef DOT11N_DRAFT3
-				if (pAd->CommonCfg.BACapability.field.b2040CoexistScanSup == 1)
+				if ((pAd->MlmeAux.Channel <= 14) && (pAd->CommonCfg.bBssCoexEnable == TRUE))
 				{
 					ULONG		Tmp;
 					HtLen = 1;
@@ -714,7 +800,49 @@ VOID ScanNextChannel(
 #endif // DOT11_N_SUPPORT //
 
 
+#ifdef WPA_SUPPLICANT_SUPPORT
+			if ((pAd->OpMode == OPMODE_STA) &&
+				(pAd->StaCfg.WpaSupplicantUP != WPA_SUPPLICANT_DISABLE) &&
+				(pAd->StaCfg.WpsProbeReqIeLen != 0))
+			{
+				ULONG 		WpsTmpLen = 0;
+				
+				MakeOutgoingFrame(pOutBuffer + FrameLen,              &WpsTmpLen,
+								pAd->StaCfg.WpsProbeReqIeLen,	pAd->StaCfg.pWpsProbeReqIe,
+								END_OF_ARGS);
+
+				FrameLen += WpsTmpLen;
+			}
+#endif // WPA_SUPPLICANT_SUPPORT //
+
 			MiniportMMRequest(pAd, 0, pOutBuffer, FrameLen);
+
+#ifdef CONFIG_STA_SUPPORT
+			IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
+			{
+				//
+				// To prevent data lost.
+				// Send an NULL data with turned PSM bit on to current associated AP when SCAN in the channel where
+				//  associated AP located.
+				//
+				if (OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_MEDIA_STATE_CONNECTED) && 
+					(INFRA_ON(pAd)) &&
+					(pAd->CommonCfg.Channel == pAd->MlmeAux.Channel))
+				{
+					NdisZeroMemory(pOutBuffer, MGMT_DMA_BUFFER_SIZE);
+					pHdr80211 = (PHEADER_802_11) pOutBuffer;
+					MgtMacHeaderInit(pAd, pHdr80211, SUBTYPE_NULL_FUNC, 1, pAd->CommonCfg.Bssid, pAd->CommonCfg.Bssid);
+					pHdr80211->Duration = 0;
+					pHdr80211->FC.Type = BTYPE_DATA;
+					pHdr80211->FC.PwrMgmt = PWR_ACTIVE;
+
+					// Send using priority queue
+					MiniportMMRequest(pAd, 0, pOutBuffer, sizeof(HEADER_802_11));
+					DBGPRINT(RT_DEBUG_TRACE, ("ScanNextChannel():Send PWA NullData frame to notify the associated AP!\n"));
+				}
+			}
+#endif // CONFIG_STA_SUPPORT //
+
 			MlmeFreeMemory(pAd, pOutBuffer);
 		}
 
@@ -727,25 +855,7 @@ VOID ScanNextChannel(
 
 	}
 }
+#endif
 
-VOID MgtProbReqMacHeaderInit(
-	IN	PRTMP_ADAPTER	pAd, 
-	IN OUT PHEADER_802_11 pHdr80211, 
-	IN UCHAR SubType, 
-	IN UCHAR ToDs, 
-	IN PUCHAR pDA, 
-	IN PUCHAR pBssid) 
-{
-	NdisZeroMemory(pHdr80211, sizeof(HEADER_802_11));
-	
-	pHdr80211->FC.Type = BTYPE_MGMT;
-	pHdr80211->FC.SubType = SubType;
-	if (SubType == SUBTYPE_ACK)
-		pHdr80211->FC.Type = BTYPE_CNTL;
-	pHdr80211->FC.ToDs = ToDs;
-	COPY_MAC_ADDR(pHdr80211->Addr1, pDA);
-	COPY_MAC_ADDR(pHdr80211->Addr2, pAd->CurrentAddress);
-	COPY_MAC_ADDR(pHdr80211->Addr3, pBssid);
-}
 
 

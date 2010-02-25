@@ -23,47 +23,50 @@
  * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             * 
  *                                                                       * 
  *************************************************************************
-
+ 
     Module Name:
-    rt3370.h
-
+    vr_ikans.h
+ 
     Abstract:
-
+    Only for IKANOS Vx160 or Vx180 platform.
+ 
     Revision History:
-    Who          When          What
-    ---------    ----------    ----------------------------------------------
+    Who         When          What
+    --------    ----------    ----------------------------------------------
+    Sample Lin	01-28-2008    Created
+
  */
 
-#ifndef __RT3370_H__
-#define __RT3370_H__
+#ifndef __VR_IKANS_H__
+#define __VR_IKANS_H__
 
-#ifdef RT3370
+#ifndef MODULE_IKANOS
+#define IKANOS_EXTERN	extern
+#else
+#define IKANOS_EXTERN
+#endif // MODULE_IKANOS //
+
+#ifdef IKANOS_VX_1X0
+	typedef void (*IkanosWlanTxCbFuncP)(void *, void *);
+
+	struct IKANOS_TX_INFO
+	{
+		struct net_device *netdev;
+		IkanosWlanTxCbFuncP *fp;
+	};
+#endif // IKANOS_VX_1X0 //
 
 
-#ifndef RTMP_USB_SUPPORT
-#error "For RT3070, you should define the compile flag -DRTMP_USB_SUPPORT"
-#endif
+IKANOS_EXTERN void VR_IKANOS_FP_Init(UINT8 BssNum, UINT8 *pApMac);
 
-#ifndef RTMP_MAC_USB
-#error "For RT3070, you should define the compile flag -DRTMP_MAC_USB"
-#endif
+IKANOS_EXTERN INT32 IKANOS_DataFramesTx(struct sk_buff *pSkb,
+										struct net_device *pNetDev);
 
-#ifndef RTMP_RF_RW_SUPPORT
-#error "For RT3070, you should define the compile flag -DRTMP_RF_RW_SUPPORT"
-#endif
+IKANOS_EXTERN void IKANOS_DataFrameRx(PRTMP_ADAPTER pAd,
+										void *pRxParam,
+										struct sk_buff *pSkb,
+										UINT32 Length);
 
-#ifndef RT33xx
-#error "For RT3070, you should define the compile flag -DRT30xx"
-#endif
+#endif // __VR_IKANS_H__ //
 
-#include "chip/mac_usb.h"
-#include "chip/rt33xx.h"
-
-//
-// Device ID & Vendor ID, these values should match EEPROM value
-//
-
-#endif // RT3370 //
-
-#endif //__RT3370_H__ //
-
+/* End of vr_ikans.h */

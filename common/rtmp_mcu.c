@@ -391,6 +391,16 @@ NDIS_STATUS RtmpAsicLoadFirmware(
 		DBGPRINT(RT_DEBUG_ERROR, ("NICLoadFirmware: MCU is not ready\n\n\n"));
 		Status = NDIS_STATUS_FAILURE;
 	}
+#ifdef RTMP_USB_SUPPORT /* make sure the MCU is well running before trigger it up. */
+	else
+	{
+		RTUSBWriteMACRegister(pAd, H2M_BBP_AGENT, 0); /* initialize BBP R/W access agent. */ /* fonchi comment: merge it from RT_WIFI. */
+		RTUSBWriteMACRegister(pAd,H2M_MAILBOX_CSR,0);
+		RTUSBWriteMACRegister(pAd, H2M_INT_SRC, 0); /* fonchi comment: merge it from RT_WIFI. */
+		AsicSendCommandToMcu(pAd, 0x72, 0x00, 0x00, 0x00);//reset rf by MCU supported by new firmware
+		//2008/11/28:KH add to fix the dead rf frequency offset bug-->
+	}
+#endif // RTMP_USB_SUPPORT //
 
     DBGPRINT(RT_DEBUG_TRACE, ("<=== %s (status=%d)\n", __FUNCTION__, Status));
 
@@ -408,11 +418,12 @@ INT RtmpAsicSendCommandToMcu(
 	HOST_CMD_CSR_STRUC	H2MCmd;
 	H2M_MAILBOX_STRUC	H2MMailbox;
 	ULONG				i = 0;
-#ifdef PCIE_PS_SUPPORT
 #ifdef CONFIG_STA_SUPPORT
+#ifdef PCIE_PS_SUPPORT
 	// 3090F power solution 3 has hw limitation that needs to ban all mcu command 
 	// when firmware is in radio state.  For other chip doesn't have this limitation. 
-	if (((IS_RT3090(pAd) || IS_RT3572(pAd) || IS_RT3390(pAd)) && IS_VERSION_AFTER_F(pAd)) && IS_VERSION_AFTER_F(pAd)
+	if ((IS_RT3090(pAd) || IS_RT3572(pAd) ||
+		IS_RT3390(pAd) || IS_RT3593(pAd)) && IS_VERSION_AFTER_F(pAd)
 		&& (pAd->StaCfg.PSControl.field.rt30xxPowerMode == 3) 
 		&& (pAd->StaCfg.PSControl.field.EnableNewPS == TRUE))
 	{
@@ -437,26 +448,35 @@ INT RtmpAsicSendCommandToMcu(
 		RTMP_SEM_UNLOCK(&pAd->McuCmdLock);
 
 	}
-	if (((IS_RT3090(pAd) || IS_RT3572(pAd) || IS_RT3390(pAd)) && IS_VERSION_AFTER_F(pAd)) && IS_VERSION_AFTER_F(pAd)
+
+	if (Command == SLEEP_MCU_CMD)
+		pAd->LastMCUCmd = Command;
+
+	if ((IS_RT3090(pAd) || IS_RT3572(pAd) ||
+		IS_RT3390(pAd) || IS_RT3593(pAd)) && IS_VERSION_AFTER_F(pAd)
 		&& (pAd->StaCfg.PSControl.field.rt30xxPowerMode == 3) 
 		&& (pAd->StaCfg.PSControl.field.EnableNewPS == TRUE)
 		&& (Command == WAKE_MCU_CMD))
 	{
 
-		do
+		// don't check MailBox for 0x84, 0x31
+		if ((Command != 0x84) && (Command != WAKE_MCU_CMD))
 		{
-			RTMP_IO_FORCE_READ32(pAd, H2M_MAILBOX_CSR, &H2MMailbox.word);
-			if (H2MMailbox.field.Owner == 0)
-				break;
+			do
+			{
+				RTMP_IO_FORCE_READ32(pAd, H2M_MAILBOX_CSR, &H2MMailbox.word);
+				if (H2MMailbox.field.Owner == 0)
+					break;
 
-			RTMPusecDelay(2);
-			DBGPRINT(RT_DEBUG_INFO, ("AsicSendCommanToMcu::Mail box is busy\n"));
-		} while(i++ < 100);
+				RTMPusecDelay(2);
+				DBGPRINT(RT_DEBUG_INFO, ("AsicSendCommanToMcu::Mail box is busy\n"));
+			} while(i++ < 100);
 
-		if (i >= 100)
-		{
-			DBGPRINT_ERR(("H2M_MAILBOX still hold by MCU. command fail\n"));
-			return FALSE;
+			if (i >= 100)
+			{
+				DBGPRINT_ERR(("H2M_MAILBOX still hold by MCU. command fail\n"));
+				return FALSE;
+			}
 		}
 
 		H2MMailbox.field.Owner	  = 1;	   // pass ownership to MCU
@@ -472,8 +492,8 @@ INT RtmpAsicSendCommandToMcu(
 
 	}
 	else
-#endif // CONFIG_STA_SUPPORT //
 #endif // PCIE_PS_SUPPORT //
+#endif // CONFIG_STA_SUPPORT //
 	{
 	do
 	{
@@ -507,11 +527,12 @@ INT RtmpAsicSendCommandToMcu(
 	{
 	}
 }
-#ifdef PCIE_PS_SUPPORT
 #ifdef CONFIG_STA_SUPPORT
+#ifdef PCIE_PS_SUPPORT
 	// 3090 MCU Wakeup command needs more time to be stable. 
 	// Before stable, don't issue other MCU command to prevent from firmware error.
-	if (((IS_RT3090(pAd) || IS_RT3572(pAd) || IS_RT3390(pAd)) && IS_VERSION_AFTER_F(pAd)) && IS_VERSION_AFTER_F(pAd)
+	if ((IS_RT3090(pAd) || IS_RT3572(pAd)
+		|| IS_RT3390(pAd) || IS_RT3593(pAd)) && IS_VERSION_AFTER_F(pAd)
 		&& (pAd->StaCfg.PSControl.field.rt30xxPowerMode == 3) 
 		&& (pAd->StaCfg.PSControl.field.EnableNewPS == TRUE)
 		&& (Command == WAKE_MCU_CMD))
@@ -522,8 +543,11 @@ INT RtmpAsicSendCommandToMcu(
 		//pAd->brt30xxBanMcuCmd = FALSE;
 		//NdisReleaseSpinLock(&pAd->McuCmdLock);
 	}
-#endif // CONFIG_STA_SUPPORT //
 #endif // PCIE_PS_SUPPORT //	
-	
+#endif // CONFIG_STA_SUPPORT //
+
+	if (Command == WAKE_MCU_CMD)
+		pAd->LastMCUCmd = Command;
+
 	return TRUE;
 }

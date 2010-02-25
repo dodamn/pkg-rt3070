@@ -24,8 +24,9 @@
  *                                                                       * 
  *************************************************************************
 
+
 	Module Name:
-	rt30xx.c
+	rt2880.c
 
 	Abstract:
 	Specific funcitons and variables for RT30xx.
@@ -49,7 +50,7 @@
 //
 // RF register initialization set
 //
-REG_PAIR   RT30xx_RFRegTable[] = {
+REG_PAIR   RT3020_RFRegTable[] = {
         {RF_R04,          0x40},
         {RF_R05,          0x03},
         {RF_R06,          0x02},
@@ -71,8 +72,7 @@ REG_PAIR   RT30xx_RFRegTable[] = {
         {RF_R29,          0x1F},
 };
 
-UCHAR NUM_RF_REG_PARMS = (sizeof(RT30xx_RFRegTable) / sizeof(REG_PAIR));
-
+UCHAR NUM_RF_3020_REG_PARMS = (sizeof(RT3020_RFRegTable) / sizeof(REG_PAIR));
 
 
 // Antenna divesity use GPIO3 and EESK pin for control
@@ -86,7 +86,6 @@ VOID RT30xxSetRxAnt(
 	IN UCHAR			Ant)
 {
 	UINT32	Value;
-	UINT32	x;
 
 	if ((pAd->EepromAccess) ||
 		(RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_RESET_IN_PROGRESS))	||
@@ -101,7 +100,10 @@ VOID RT30xxSetRxAnt(
 	if (Ant == 0)
 	{
 		// Main antenna
+		// E2PROM_CSR only in PCI bus Reg., USB Bus need MCU commad to control the EESK pin.
+#ifdef RTMP_MAC_USB
 		AsicSendCommandToMcu(pAd, 0x73, 0xFF, 0x1, 0x0);
+#endif // RTMP_MAC_USB //
 
 		RTMP_IO_READ32(pAd, GPIO_CTRL_CFG, &Value);
 		Value &= ~(0x0808);
@@ -111,7 +113,10 @@ VOID RT30xxSetRxAnt(
 	else
 	{
 		// Aux antenna
+		// E2PROM_CSR only in PCI bus Reg., USB Bus need MCU commad to control the EESK pin.
+#ifdef RTMP_MAC_USB
 		AsicSendCommandToMcu(pAd, 0x73, 0xFF, 0x0, 0x0);
+#endif // RTMP_MAC_USB //
 		RTMP_IO_READ32(pAd, GPIO_CTRL_CFG, &Value);
 		Value &= ~(0x0808);
 		Value |= 0x08;
@@ -144,150 +149,161 @@ VOID RTMPFilterCalibration(
 	UINT	loop = 0, count = 0, loopcnt = 0, ReTry = 0;
 	UCHAR	RF_R24_Value = 0;
 
-	// Give bbp filter initial value
-	pAd->Mlme.CaliBW20RfR24 = 0x1F;
-	pAd->Mlme.CaliBW40RfR24 = 0x2F; //Bit[5] must be 1 for BW 40
-
-	do 
+#ifdef RT3593
+	if (IS_RT3593(pAd))
 	{
-		if (loop == 1)	//BandWidth = 40 MHz
+		return;
+	}
+	else
+#endif // RT3593 //
+	{
+		// Give bbp filter initial value
+		pAd->Mlme.CaliBW20RfR24 = 0x1F;
+		pAd->Mlme.CaliBW40RfR24 = 0x2F; //Bit[5] must be 1 for BW 40
+
+		do 
 		{
-			// Write 0x27 to RF_R24 to program filter
-			RF_R24_Value = 0x27;
+			if (loop == 1)	//BandWidth = 40 MHz
+			{
+				// Write 0x27 to RF_R24 to program filter
+				RT30xxReadRFRegister(pAd, RF_R24, (PUCHAR)(&RF_R24_Value));
+				RF_R24_Value = (RF_R24_Value & 0xC0) | 0x27; // <bit 5>:tx_h20M<bit 5> and <bit 4:0>:tx_agc_fc<bit 4:0>
+				RT30xxWriteRFRegister(pAd, RF_R24, RF_R24_Value);
+				if (IS_RT3071(pAd) || IS_RT3572(pAd))
+					FilterTarget = 0x15;
+				else
+					FilterTarget = 0x19;
+
+				// when calibrate BW40, BBP mask must set to BW40.
+				RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &BBPValue);
+				BBPValue&= (~0x18);
+				BBPValue|= (0x10);
+				RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, BBPValue);
+
+				// set to BW40
+				RT30xxReadRFRegister(pAd, RF_R31, &value);
+				value |= 0x20;
+				RT30xxWriteRFRegister(pAd, RF_R31, value);
+			}
+			else			//BandWidth = 20 MHz
+			{
+				// Write 0x07 to RF_R24 to program filter
+				RT30xxReadRFRegister(pAd, RF_R24, (PUCHAR)(&RF_R24_Value));
+				RF_R24_Value = (RF_R24_Value & 0xC0) | 0x07; // <bit 5>:tx_h20M<bit 5> and <bit 4:0>:tx_agc_fc<bit 4:0>
+				RT30xxWriteRFRegister(pAd, RF_R24, RF_R24_Value);
+				if (IS_RT3071(pAd) || IS_RT3572(pAd))
+					FilterTarget = 0x13;
+				else
+					FilterTarget = 0x16;
+
+				// set to BW20
+				RT30xxReadRFRegister(pAd, RF_R31, &value);
+				value &= (~0x20);
+				RT30xxWriteRFRegister(pAd, RF_R31, value);
+			}
+
+			// Write 0x01 to RF_R22 to enable baseband loopback mode
+			RT30xxReadRFRegister(pAd, RF_R22, &value);
+			value |= 0x01;
+			RT30xxWriteRFRegister(pAd, RF_R22, value);
+
+			// Write 0x00 to BBP_R24 to set power & frequency of passband test tone
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R24, 0);
+
+			do
+			{
+				// Write 0x90 to BBP_R25 to transmit test tone
+				RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R25, 0x90);
+
+				RTMPusecDelay(1000);
+				// Read BBP_R55[6:0] for received power, set R55x = BBP_R55[6:0]
+				RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R55, &value);
+				R55x = value & 0xFF;
+
+			} while ((ReTry++ < 100) && (R55x == 0));
+			
+			// Write 0x06 to BBP_R24 to set power & frequency of stopband test tone
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R24, 0x06);
+
+			while(TRUE)
+			{
+				// Write 0x90 to BBP_R25 to transmit test tone
+				RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R25, 0x90);
+
+				//We need to wait for calibration
+				RTMPusecDelay(1000);
+				RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R55, &value);
+				value &= 0xFF;
+				if ((R55x - value) < FilterTarget)
+				{
+					RF_R24_Value ++;
+				}
+				else if ((R55x - value) == FilterTarget)
+				{
+					RF_R24_Value ++;
+					count ++;
+				}
+				else
+				{
+					break;
+				}
+
+				// prevent infinite loop cause driver hang.
+				if (loopcnt++ > 100)
+				{
+					DBGPRINT(RT_DEBUG_ERROR, ("RTMPFilterCalibration - can't find a valid value, loopcnt=%d stop calibrating", loopcnt));
+					break;
+				}
+
+				// Write RF_R24 to program filter
+				RT30xxWriteRFRegister(pAd, RF_R24, RF_R24_Value);
+			}
+
+			if (count > 0)
+			{
+				RF_R24_Value = RF_R24_Value - ((count) ? (1) : (0));
+			}
+
+			// Store for future usage
+			if (loopcnt < 100)
+			{
+				if (loop++ == 0)
+				{
+					//BandWidth = 20 MHz
+					pAd->Mlme.CaliBW20RfR24 = (UCHAR)RF_R24_Value;
+				}
+				else
+				{
+					//BandWidth = 40 MHz
+					pAd->Mlme.CaliBW40RfR24 = (UCHAR)RF_R24_Value;
+					break;
+				}
+			}
+			else 
+				break;
+
 			RT30xxWriteRFRegister(pAd, RF_R24, RF_R24_Value);
-			if (IS_RT3090(pAd) || IS_RT3572(pAd)|| IS_RT3390(pAd))
-				FilterTarget = 0x15;
-			else
-				FilterTarget = 0x19;
 
-			// when calibrate BW40, BBP mask must set to BW40.
-			RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &BBPValue);
-			BBPValue&= (~0x18);
-			BBPValue|= (0x10);
-			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, BBPValue);
+			// reset count
+			count = 0;
+		} while(TRUE);
 
-			// set to BW40
-			RT30xxReadRFRegister(pAd, RF_R31, &value);
-			value |= 0x20;
-			RT30xxWriteRFRegister(pAd, RF_R31, value);
-		}
-		else			//BandWidth = 20 MHz
-		{
-			// Write 0x07 to RF_R24 to program filter
-			RF_R24_Value = 0x07;
-			RT30xxWriteRFRegister(pAd, RF_R24, RF_R24_Value);
-			if (IS_RT3090(pAd) || IS_RT3572(pAd)|| IS_RT3390(pAd))
-				FilterTarget = 0x13;
-			else
-				FilterTarget = 0x16;
-
-			// set to BW20
-			RT30xxReadRFRegister(pAd, RF_R31, &value);
-			value &= (~0x20);
-			RT30xxWriteRFRegister(pAd, RF_R31, value);
-		}
-
-		// Write 0x01 to RF_R22 to enable baseband loopback mode
-		RT30xxReadRFRegister(pAd, RF_R22, &value);
-		value |= 0x01;
-		RT30xxWriteRFRegister(pAd, RF_R22, value);
-
-		// Write 0x00 to BBP_R24 to set power & frequency of passband test tone
+		//
+		// Set back to initial state
+		//
 		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R24, 0);
 
-		do
-		{
-			// Write 0x90 to BBP_R25 to transmit test tone
-			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R25, 0x90);
+		RT30xxReadRFRegister(pAd, RF_R22, &value);
+		value &= ~(0x01);
+		RT30xxWriteRFRegister(pAd, RF_R22, value);
 
-			RTMPusecDelay(1000);
-			// Read BBP_R55[6:0] for received power, set R55x = BBP_R55[6:0]
-			RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R55, &value);
-			R55x = value & 0xFF;
+		// set BBP back to BW20
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &BBPValue);
+		BBPValue&= (~0x18);
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, BBPValue);
 
-		} while ((ReTry++ < 100) && (R55x == 0));
-		
-		// Write 0x06 to BBP_R24 to set power & frequency of stopband test tone
-		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R24, 0x06);
-
-		while(TRUE)
-		{
-			// Write 0x90 to BBP_R25 to transmit test tone
-			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R25, 0x90);
-
-			//We need to wait for calibration
-			RTMPusecDelay(1000);
-			RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R55, &value);
-			value &= 0xFF;
-			if ((R55x - value) < FilterTarget)
-			{
-				RF_R24_Value ++;
-			}
-			else if ((R55x - value) == FilterTarget)
-			{
-				RF_R24_Value ++;
-				count ++;
-			}
-			else
-			{
-				break;
-			}
-
-			// prevent infinite loop cause driver hang.
-			if (loopcnt++ > 100)
-			{
-				DBGPRINT(RT_DEBUG_ERROR, ("RTMPFilterCalibration - can't find a valid value, loopcnt=%d stop calibrating", loopcnt));
-				break;
-			}
-
-			// Write RF_R24 to program filter
-			RT30xxWriteRFRegister(pAd, RF_R24, RF_R24_Value);
-		}
-
-		if (count > 0)
-		{
-			RF_R24_Value = RF_R24_Value - ((count) ? (1) : (0));
-		}
-
-		// Store for future usage
-		if (loopcnt < 100)
-		{
-			if (loop++ == 0)
-			{
-				//BandWidth = 20 MHz
-				pAd->Mlme.CaliBW20RfR24 = (UCHAR)RF_R24_Value;
-			}
-			else
-			{
-				//BandWidth = 40 MHz
-				pAd->Mlme.CaliBW40RfR24 = (UCHAR)RF_R24_Value;
-				break;
-			}
-		}
-		else 
-			break;
-
-		RT30xxWriteRFRegister(pAd, RF_R24, RF_R24_Value);
-
-		// reset count
-		count = 0;
-	} while(TRUE);
-
-	//
-	// Set back to initial state
-	//
-	RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R24, 0);
-
-	RT30xxReadRFRegister(pAd, RF_R22, &value);
-	value &= ~(0x01);
-	RT30xxWriteRFRegister(pAd, RF_R22, value);
-
-	// set BBP back to BW20
-	RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &BBPValue);
-	BBPValue&= (~0x18);
-	RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, BBPValue);
-
-	DBGPRINT(RT_DEBUG_TRACE, ("RTMPFilterCalibration - CaliBW20RfR24=0x%x, CaliBW40RfR24=0x%x\n", pAd->Mlme.CaliBW20RfR24, pAd->Mlme.CaliBW40RfR24));
+		DBGPRINT(RT_DEBUG_TRACE, ("RTMPFilterCalibration - CaliBW20RfR24=0x%x, CaliBW40RfR24=0x%x\n", pAd->Mlme.CaliBW20RfR24, pAd->Mlme.CaliBW40RfR24));
+	}
 }
 
 
@@ -303,7 +319,54 @@ VOID RTMPFilterCalibration(
 VOID RT30xxLoadRFNormalModeSetup(
 	IN PRTMP_ADAPTER 	pAd)
 {
-	UCHAR RFValue;
+	UCHAR RFValue, bbpreg = 0;
+
+#ifdef RT3593
+	if (IS_RT3593(pAd))
+	{
+		// improve power consumption 
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R138, &bbpreg);
+		if (pAd->Antenna.field.TxPath == 1)
+		{
+			// turn off tx DAC_1 & DAC_2
+			bbpreg = (bbpreg | 0x60);
+		}
+		else if (pAd->Antenna.field.TxPath == 2)
+		{
+			// turn off tx DAC_2
+			bbpreg = (bbpreg | 0x40);		
+		}
+
+		if (pAd->Antenna.field.RxPath == 1)
+		{
+			// turn off rx ADC_1 & ADC_2
+			bbpreg &= (~0x6);
+		}
+		else if (pAd->Antenna.field.RxPath == 2)
+		{
+			// turn off rx ADC_2
+			bbpreg &= (~0x4);
+		}		
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R138, bbpreg);		
+	}
+	else
+#endif // RT3593 //
+	{
+		// improve power consumption 
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R138, &bbpreg);
+		if (pAd->Antenna.field.TxPath == 1)
+		{
+			// turn off tx DAC_1
+			bbpreg = (bbpreg | 0x20);
+		}
+
+		if (pAd->Antenna.field.RxPath == 1)
+		{
+			// turn off tx ADC_1
+			bbpreg &= (~0x2);
+		}
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R138, bbpreg);
+	}
 
 	// RX0_PD & TX0_PD, RF R1 register Bit 2 & Bit 3 to 0 and RF_BLOCK_en,RX1_PD & TX1_PD, Bit0, Bit 4 & Bit5 to 1
 	RT30xxReadRFRegister(pAd, RF_R01, &RFValue);
@@ -315,7 +378,7 @@ VOID RT30xxLoadRFNormalModeSetup(
 	RFValue &= (~0x08);
 	RT30xxWriteRFRegister(pAd, RF_R15, RFValue);
 
-	/* move to NICInitRT30xxRFRegisters
+
 	// TX_LO1_en, RF R17 register Bit 3 to 0
 	RT30xxReadRFRegister(pAd, RF_R17, &RFValue);
 	RFValue &= (~0x08);
@@ -331,7 +394,6 @@ VOID RT30xxLoadRFNormalModeSetup(
 		RFValue |= pAd->TxMixerGain24G;
 	}
 	RT30xxWriteRFRegister(pAd, RF_R17, RFValue);
-	*/
 
 	// RX_LO1_en, RF R20 register Bit 3 to 0
 	RT30xxReadRFRegister(pAd, RF_R20, &RFValue);
@@ -342,21 +404,6 @@ VOID RT30xxLoadRFNormalModeSetup(
 	RT30xxReadRFRegister(pAd, RF_R21, &RFValue);
 	RFValue &= (~0x08);
 	RT30xxWriteRFRegister(pAd, RF_R21, RFValue);
-
-	/* add by johnli, reset RF_R27 when interface down & up to fix throughput problem*/
-	// LDORF_VC, RF R27 register Bit 2 to 0
-	RT30xxReadRFRegister(pAd, RF_R27, &RFValue);
-	// TX to RX IQ glitch(RF_R27) has been fixed in RT3070(F). 
-	// Raising RF voltage is no longer needed for RT3070(F)
-	if (IS_RT3090(pAd))	// RT309x and RT3071/72
-	{
-		if ((pAd->MACVersion & 0xffff) < 0x0211)
-			RFValue = (RFValue & (~0x77)) | 0x3;
-		else
-			RFValue = (RFValue & (~0x77));
-		RT30xxWriteRFRegister(pAd, RF_R27, RFValue);
-	}
-	/* end johnli */
 }
 
 /*
@@ -374,38 +421,64 @@ VOID RT30xxLoadRFSleepModeSetup(
 	UINT32 MACValue;
 
 
-#ifdef RTMP_MAC_USB
 	if(!IS_RT3572(pAd))
-#endif // RTMP_MAC_USB //
 	{
-		// RF_BLOCK_en. RF R1 register Bit 0 to 0
-		RT30xxReadRFRegister(pAd, RF_R01, &RFValue);
-		RFValue &= (~0x01);
-		RT30xxWriteRFRegister(pAd, RF_R01, RFValue);
+#ifdef RT3593
+		if (IS_RT3593(pAd))
+		{
+			UCHAR	rfreg;
 
-		// VCO_IC, RF R7 register Bit 4 & Bit 5 to 0
-		RT30xxReadRFRegister(pAd, RF_R07, &RFValue);
-		RFValue &= (~0x30);
-		RT30xxWriteRFRegister(pAd, RF_R07, RFValue);
+			RT30xxReadRFRegister(pAd, RF_R01, &rfreg);
+			rfreg = ((rfreg & ~0x01) | 0x00); // vco_en
+			RT30xxWriteRFRegister(pAd, RF_R01, rfreg);
 
-		// Idoh, RF R9 register Bit 1, Bit 2 & Bit 3 to 0
-		RT30xxReadRFRegister(pAd, RF_R09, &RFValue);
-		RFValue &= (~0x0E);
-		RT30xxWriteRFRegister(pAd, RF_R09, RFValue);
+			RT30xxReadRFRegister(pAd, RF_R06, &rfreg);
+			rfreg &= (~0x40); // vco_ic (VCO bias current control, 00: off)
+			RT30xxWriteRFRegister(pAd, RF_R06, rfreg);
 
-		// RX_CTB_en, RF R21 register Bit 7 to 0
-		RT30xxReadRFRegister(pAd, RF_R21, &RFValue);
-		RFValue &= (~0x80);
-		RT30xxWriteRFRegister(pAd, RF_R21, RFValue);
+			RT30xxReadRFRegister(pAd, RF_R22, &rfreg);
+			rfreg = ((rfreg & ~0xE0) | 0x00); // cp_ic (reference current control, 000: 0.25 mA)
+			RT30xxWriteRFRegister(pAd, RF_R22, rfreg);
+
+			RT30xxReadRFRegister(pAd, RF_R46, &rfreg);
+			rfreg &= (~0x20); // rx_ctb_en
+			RT30xxWriteRFRegister(pAd, RF_R46, rfreg);
+
+			RT30xxReadRFRegister(pAd, RF_R20, &rfreg);
+			rfreg |= 0xEE; // ldo_pll_vc and ldo_rf_vc (111: -0.15)
+			RT30xxWriteRFRegister(pAd, RF_R20, rfreg);
+		}
+		else
+#endif // RT3593 //
+		{
+			// RF_BLOCK_en. RF R1 register Bit 0 to 0
+			RT30xxReadRFRegister(pAd, RF_R01, &RFValue);
+			RFValue &= (~0x01);
+			RT30xxWriteRFRegister(pAd, RF_R01, RFValue);
+
+			// VCO_IC, RF R7 register Bit 4 & Bit 5 to 0
+			RT30xxReadRFRegister(pAd, RF_R07, &RFValue);
+			RFValue &= (~0x30);
+			RT30xxWriteRFRegister(pAd, RF_R07, RFValue);
+
+			// Idoh, RF R9 register Bit 1, Bit 2 & Bit 3 to 0
+			RT30xxReadRFRegister(pAd, RF_R09, &RFValue);
+			RFValue &= (~0x0E);
+			RT30xxWriteRFRegister(pAd, RF_R09, RFValue);
+
+			// RX_CTB_en, RF R21 register Bit 7 to 0
+			RT30xxReadRFRegister(pAd, RF_R21, &RFValue);
+			RFValue &= (~0x80);
+			RT30xxWriteRFRegister(pAd, RF_R21, RFValue);
+		}
 	}
 
+	// Don't touch LDO_CFG0 for 3090F & 3593, possibly the board is single power scheme
 	if (IS_RT3090(pAd) ||	// IS_RT3090 including RT309x and RT3071/72
 		IS_RT3572(pAd) ||
 		(IS_RT3070(pAd) && ((pAd->MACVersion & 0xffff) < 0x0201)))
 	{
-#ifdef RTMP_MAC_USB
 		if (!IS_RT3572(pAd))
-#endif // RTMP_MAC_USB //
 		{
 			RT30xxReadRFRegister(pAd, RF_R27, &RFValue);
 			RFValue |= 0x77;
@@ -432,39 +505,73 @@ VOID RT30xxReverseRFSleepModeSetup(
 	UCHAR RFValue;
 	UINT32 MACValue;
 
-#ifdef RTMP_MAC_USB
 	if(!IS_RT3572(pAd))
-#endif // RTMP_MAC_USB //
 	{
-		// RF_BLOCK_en, RF R1 register Bit 0 to 1
-		RT30xxReadRFRegister(pAd, RF_R01, &RFValue);
-		RFValue |= 0x01;
-		RT30xxWriteRFRegister(pAd, RF_R01, RFValue);
+#ifdef RT3593
+		if (IS_RT3593(pAd))
+		{
+			UCHAR	rfreg;
 
-		// VCO_IC, RF R7 register Bit 4 & Bit 5 to 1
-		RT30xxReadRFRegister(pAd, RF_R07, &RFValue);
-		RFValue |= 0x30;
-		RT30xxWriteRFRegister(pAd, RF_R07, RFValue);
+			RT30xxReadRFRegister(pAd, RF_R01, &rfreg);
+			rfreg = ((rfreg & ~0x01) | 0x01); // vco_en
+			RT30xxWriteRFRegister(pAd, RF_R01, rfreg);
 
-		// Idoh, RF R9 register Bit 1, Bit 2 & Bit 3 to 1
-		RT30xxReadRFRegister(pAd, RF_R09, &RFValue);
-		RFValue |= 0x0E;
-		RT30xxWriteRFRegister(pAd, RF_R09, RFValue);
+			RT30xxReadRFRegister(pAd, RF_R03, &rfreg);
+			rfreg |= 0x80; // vcocal_en (initiate VCO calibration (reset after completion))
+			RT30xxWriteRFRegister(pAd, RF_R03, rfreg);
 
-		// RX_CTB_en, RF R21 register Bit 7 to 1
-		RT30xxReadRFRegister(pAd, RF_R21, &RFValue);
-		RFValue |= 0x80;
-		RT30xxWriteRFRegister(pAd, RF_R21, RFValue);
+			RT30xxReadRFRegister(pAd, RF_R06, &rfreg);
+			rfreg |= 0x40; // vco_ic (VCO bias current control, 11: high)
+			RT30xxWriteRFRegister(pAd, RF_R06, rfreg);
+			
+			RT30xxReadRFRegister(pAd, RF_R02, &rfreg);
+			rfreg |= 0x80; // rescal_en (initiate calibration)
+			RT30xxWriteRFRegister(pAd, RF_R02, rfreg);
+
+			RT30xxReadRFRegister(pAd, RF_R22, &rfreg);
+			rfreg = ((rfreg & ~0xE0) | 0x20); // cp_ic (reference current control, 001: 0.33 mA)
+			RT30xxWriteRFRegister(pAd, RF_R22, rfreg);
+
+			RT30xxReadRFRegister(pAd, RF_R46, &rfreg);
+			rfreg |= 0x20; // rx_ctb_en
+			RT30xxWriteRFRegister(pAd, RF_R46, rfreg);
+
+			RT30xxReadRFRegister(pAd, RF_R20, &rfreg);
+			rfreg &= (~0xEE); // ldo_rf_vc and ldo_pll_vc ( 111: +0.15)
+			RT30xxWriteRFRegister(pAd, RF_R20, rfreg);
+		}
+		else
+#endif // RT3593 //
+		{
+			// RF_BLOCK_en, RF R1 register Bit 0 to 1
+			RT30xxReadRFRegister(pAd, RF_R01, &RFValue);
+			RFValue |= 0x01;
+			RT30xxWriteRFRegister(pAd, RF_R01, RFValue);
+
+			// VCO_IC, RF R7 register Bit 4 & Bit 5 to 1
+			RT30xxReadRFRegister(pAd, RF_R07, &RFValue);
+			RFValue |= 0x30;
+			RT30xxWriteRFRegister(pAd, RF_R07, RFValue);
+
+			// Idoh, RF R9 register Bit 1, Bit 2 & Bit 3 to 1
+			RT30xxReadRFRegister(pAd, RF_R09, &RFValue);
+			RFValue |= 0x0E;
+			RT30xxWriteRFRegister(pAd, RF_R09, RFValue);
+
+			// RX_CTB_en, RF R21 register Bit 7 to 1
+			RT30xxReadRFRegister(pAd, RF_R21, &RFValue);
+			RFValue |= 0x80;
+			RT30xxWriteRFRegister(pAd, RF_R21, RFValue);
+		}
 	}
 
 	if (IS_RT3090(pAd) ||	// IS_RT3090 including RT309x and RT3071/72
 		IS_RT3572(pAd) ||
 		IS_RT3390(pAd) ||
+		IS_RT3593(pAd) ||
 		(IS_RT3070(pAd) && ((pAd->MACVersion & 0xffff) < 0x0201)))
 	{
-#ifdef RTMP_MAC_USB
-		if (!IS_RT3572(pAd))
-#endif // RTMP_MAC_USB //
+		if ((!IS_RT3572(pAd)) && (!IS_RT3593(pAd)))
 		{
 			RT30xxReadRFRegister(pAd, RF_R27, &RFValue);
 			if ((pAd->MACVersion & 0xffff) < 0x0211)
@@ -482,12 +589,14 @@ VOID RT30xxReverseRFSleepModeSetup(
 			MACValue = ((MACValue & 0xE0FFFFFF) | 0x0D000000);
 			RTMP_IO_WRITE32(pAd, LDO_CFG0, MACValue);
 		}
-		else
+//		else if ((!IS_RT3090(pAd) && !IS_RT3593(pAd)) || (pAd->CommonCfg.PatchHWControl.field.LDOCfg == 1))
+		else if ((!IS_RT3090(pAd) && !IS_RT3593(pAd)))
 		{
 			RTMP_IO_READ32(pAd, LDO_CFG0, &MACValue);
 			MACValue = ((MACValue & 0xE0FFFFFF) | 0x01000000);
 			RTMP_IO_WRITE32(pAd, LDO_CFG0, MACValue);
 		}
+
 	}
 
 	if(IS_RT3572(pAd))

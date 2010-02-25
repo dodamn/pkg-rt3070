@@ -42,7 +42,6 @@ extern UCHAR	WPA_OUI[];
 extern UCHAR	RSN_OUI[];
 extern UCHAR	WME_INFO_ELEM[];
 extern UCHAR	WME_PARM_ELEM[];
-extern UCHAR	Ccx2QosInfo[];
 extern UCHAR	RALINK_OUI[];
 extern UCHAR	BROADCOM_OUI[];
 extern UCHAR    WPS_OUI[];
@@ -307,6 +306,7 @@ BOOLEAN PeerBeaconAndProbeRspSanity(
     OUT UCHAR		 *pPreNHtCapabilityLen,
 #endif // CONFIG_STA_SUPPORT //
     OUT HT_CAPABILITY_IE *pHtCapability,
+    OUT EXT_CAP_INFO_ELEMENT	*pExtCapInfo,
 	OUT UCHAR		 *AddHtInfoLen,
 	OUT ADD_HT_INFO_IE *AddHtInfo,
 	OUT UCHAR *NewExtChannelOffset,		// Ht extension channel offset(above or below)
@@ -349,6 +349,7 @@ BOOLEAN PeerBeaconAndProbeRspSanity(
 		*pPreNHtCapabilityLen = 0;					// Set the length of VIE to init value 0
 #endif // CONFIG_STA_SUPPORT //
     *AddHtInfoLen = 0;					// Set the length of VIE to init value 0
+    NdisZeroMemory(pExtCapInfo, sizeof(EXT_CAP_INFO_ELEMENT));
     *pRalinkIe = 0;
     *pNewChannel = 0;
     *NewExtChannelOffset = 0xff;	//Default 0xff means no such IE
@@ -651,7 +652,7 @@ BOOLEAN PeerBeaconAndProbeRspSanity(
 #endif // CONFIG_STA_SUPPORT //
                 else if (NdisEqualMemory(pEid->Octet, WPA_OUI, 4))
                 {
-                    // Copy to pVIE which will report to microsoft bssid list.
+                    // Copy to pVIE which will report to bssid list.
                     Ptr = (PUCHAR) pVIE;
                     NdisMoveMemory(Ptr + *LengthVIE, &pEid->Eid, pEid->Len + 2);
                     *LengthVIE += (pEid->Len + 2);
@@ -715,8 +716,13 @@ BOOLEAN PeerBeaconAndProbeRspSanity(
                     pEdcaParm->Cwmax[QID_AC_VO] = CW_MAX_IN_BITS-1;
                     pEdcaParm->Txop[QID_AC_VO]  = 48;   // AC_VO: 48*32us ~= 1.5ms
                 }
-#ifdef CONFIG_STA_SUPPORT 
-#endif // CONFIG_STA_SUPPORT //                
+				else if (NdisEqualMemory(pEid->Octet, WPS_OUI, 4))
+                {
+                	// Copy to pVIE which will report to bssid list.
+                    Ptr = (PUCHAR) pVIE;
+                    NdisMoveMemory(Ptr + *LengthVIE, &pEid->Eid, pEid->Len + 2);
+                    *LengthVIE += (pEid->Len + 2);
+                }
 
                 
                 break;
@@ -775,9 +781,10 @@ BOOLEAN PeerBeaconAndProbeRspSanity(
                     *LengthVIE += (pEid->Len + 2);
                 }
                 break;
+
 #ifdef CONFIG_STA_SUPPORT
 #if defined (EXT_BUILD_CHANNEL_LIST) || defined (RT_CFG80211_SUPPORT)
-			case IE_COUNTRY:				
+			case IE_COUNTRY:
 				Ptr = (PUCHAR) pVIE;
                 NdisMoveMemory(Ptr + *LengthVIE, &pEid->Eid, pEid->Len + 2);
                 *LengthVIE += (pEid->Len + 2);
@@ -785,6 +792,29 @@ BOOLEAN PeerBeaconAndProbeRspSanity(
 #endif // EXT_BUILD_CHANNEL_LIST //
 #endif // CONFIG_STA_SUPPORT //
 
+            case IE_QBSS_LOAD:
+                if (pEid->Len == 5)
+                {
+                    pQbssLoad->bValid = TRUE;
+                    pQbssLoad->StaNum = pEid->Octet[0] + pEid->Octet[1] * 256;
+                    pQbssLoad->ChannelUtilization = pEid->Octet[2];
+                    pQbssLoad->RemainingAdmissionControl = pEid->Octet[3] + pEid->Octet[4] * 256;
+
+					// Copy to pVIE
+                    Ptr = (PUCHAR) pVIE;
+                    NdisMoveMemory(Ptr + *LengthVIE, &pEid->Eid, pEid->Len + 2);
+                    *LengthVIE += (pEid->Len + 2);
+                }
+                break;
+                
+
+
+			case IE_EXT_CAPABILITY:
+			if (pEid->Len >= 1)
+			{
+				NdisMoveMemory(pExtCapInfo,&pEid->Octet[0], sizeof(EXT_CAP_INFO_ELEMENT) /*4*/);
+				break;
+			}
 
             default:
                 break;
@@ -838,17 +868,19 @@ BOOLEAN PeerBeaconAndProbeRspSanity2(
 	IN PRTMP_ADAPTER pAd, 
 	IN VOID *Msg, 
 	IN ULONG MsgLen, 
-	OUT UCHAR 	*RegClass) 
+	IN OVERLAP_BSS_SCAN_IE *BssScan,
+	OUT UCHAR 	*RegClass)
 {
 	CHAR				*Ptr;
 	PFRAME_802_11		pFrame;
 	PEID_STRUCT			pEid;
 	ULONG				Length = 0;	
+	BOOLEAN				brc;
 
 	pFrame = (PFRAME_802_11)Msg;
 
 	*RegClass = 0;
-	Ptr = (PCHAR) pFrame->Octet;
+	Ptr = pFrame->Octet;
 	Length += LENGTH_802_11;
 
 	// get timestamp from payload and advance the pointer
@@ -864,7 +896,9 @@ BOOLEAN PeerBeaconAndProbeRspSanity2(
 	Length += 2;
 
 	pEid = (PEID_STRUCT) Ptr;
+	brc = FALSE;
 
+	RTMPZeroMemory(BssScan, sizeof(OVERLAP_BSS_SCAN_IE));
 	// get variable fields from payload and advance the pointer
 	while ((Length + 2 + pEid->Len) <= MsgLen)	  
 	{	
@@ -877,21 +911,37 @@ BOOLEAN PeerBeaconAndProbeRspSanity2(
 				}
 				else
 				{
-					DBGPRINT(RT_DEBUG_TRACE, ("PeerBeaconAndProbeRspSanity - wrong IE_SSID (len=%d)\n",pEid->Len));
-					return FALSE;
+					DBGPRINT(RT_DEBUG_TRACE, ("PeerBeaconAndProbeRspSanity - wrong IE_SUPP_REG_CLASS (len=%d)\n",pEid->Len));
 				}
 				break;
+			case IE_OVERLAPBSS_SCAN_PARM:
+				if (pEid->Len == sizeof(OVERLAP_BSS_SCAN_IE))
+				{
+					brc = TRUE;
+					RTMPMoveMemory(BssScan, pEid->Octet, sizeof(OVERLAP_BSS_SCAN_IE));
+				}
+				else
+				{
+					DBGPRINT(RT_DEBUG_TRACE, ("PeerBeaconAndProbeRspSanity - wrong IE_OVERLAPBSS_SCAN_PARM (len=%d)\n",pEid->Len));
+				}
+				break;
+
+			case IE_EXT_CHANNEL_SWITCH_ANNOUNCEMENT:
+				DBGPRINT(RT_DEBUG_TRACE, ("PeerBeaconAndProbeRspSanity - IE_EXT_CHANNEL_SWITCH_ANNOUNCEMENT\n"));
+				break;
+
 		}
 
 		Length = Length + 2 + pEid->Len;  // Eid[1] + Len[1]+ content[Len]	
 		pEid = (PEID_STRUCT)((UCHAR*)pEid + 2 + pEid->Len); 	   
 	}
 
-	return TRUE;
+	return brc;
 
 }
 #endif // DOT11N_DRAFT3 //
 
+#if defined(AP_SCAN_SUPPORT) || defined(CONFIG_STA_SUPPORT)
 /* 
     ==========================================================================
     Description:
@@ -919,8 +969,11 @@ BOOLEAN MlmeScanReqSanity(
 
 	if ((*pBssType == BSS_INFRA || *pBssType == BSS_ADHOC || *pBssType == BSS_ANY)
 		&& (*pScanType == SCAN_ACTIVE || *pScanType == SCAN_PASSIVE
-#ifdef CONFIG_STA_SUPPORT
-#endif // CONFIG_STA_SUPPORT //
+#ifdef DOT11_N_SUPPORT
+#ifdef DOT11N_DRAFT3
+		|| (*pScanType == SCAN_2040_BSS_COEXIST) 
+#endif //DOT11N_DRAFT3 //
+#endif // DOT11_N_SUPPORT //
 		))
 	{
 		return TRUE;
@@ -931,6 +984,7 @@ BOOLEAN MlmeScanReqSanity(
 		return FALSE;
 	}
 }
+#endif
 
 // IRQL = DISPATCH_LEVEL
 UCHAR ChannelSanity(
@@ -962,12 +1016,16 @@ BOOLEAN PeerDeauthSanity(
     IN PRTMP_ADAPTER pAd, 
     IN VOID *Msg, 
     IN ULONG MsgLen, 
+    OUT PUCHAR pAddr1, 
     OUT PUCHAR pAddr2, 
+    OUT PUCHAR pAddr3, 
     OUT USHORT *pReason) 
 {
     PFRAME_802_11 pFrame = (PFRAME_802_11)Msg;
 
+	COPY_MAC_ADDR(pAddr1, pFrame->Hdr.Addr1);
     COPY_MAC_ADDR(pAddr2, pFrame->Hdr.Addr2);
+	COPY_MAC_ADDR(pAddr3, pFrame->Hdr.Addr3);
     NdisMoveMemory(pReason, &pFrame->Octet[0], 2);
 
     return TRUE;
@@ -1064,6 +1122,8 @@ BOOLEAN MlmeAuthReqSanity(
      	) && 
         ((*pAddr & 0x01) == 0)) 
     {
+#ifdef CONFIG_STA_SUPPORT
+#endif // // CONFIG_STA_SUPPORT //
         return TRUE;
     } 
     else 
@@ -1215,199 +1275,6 @@ NDIS_802_11_NETWORK_TYPE NetworkTypeInUseSanity(
 
 	return NetWorkType;
 }	
-
-/* 
-    ==========================================================================
-    Description:
-        Check the validity of the received EAPoL frame
-    Return:
-        TRUE if all parameters are OK, 
-        FALSE otherwise
-    ==========================================================================
- */
-BOOLEAN PeerWpaMessageSanity(
-    IN 	PRTMP_ADAPTER 		pAd, 
-    IN 	PEAPOL_PACKET 		pMsg, 
-    IN 	ULONG 				MsgLen, 
-    IN 	UCHAR				MsgType,
-    IN 	MAC_TABLE_ENTRY  	*pEntry)
-{
-	UCHAR			mic[LEN_KEY_DESC_MIC], digest[80], KEYDATA[MAX_LEN_OF_RSNIE];
-	BOOLEAN			bReplayDiff = FALSE;
-	BOOLEAN			bWPA2 = FALSE;
-	KEY_INFO		EapolKeyInfo;	
-	UCHAR			GroupKeyIndex = 0;
-	
-	
-	NdisZeroMemory(mic, sizeof(mic));
-	NdisZeroMemory(digest, sizeof(digest));
-	NdisZeroMemory(KEYDATA, sizeof(KEYDATA));
-	NdisZeroMemory((PUCHAR)&EapolKeyInfo, sizeof(EapolKeyInfo));
-	
-	NdisMoveMemory((PUCHAR)&EapolKeyInfo, (PUCHAR)&pMsg->KeyDesc.KeyInfo, sizeof(KEY_INFO));
-
-	*((USHORT *)&EapolKeyInfo) = cpu2le16(*((USHORT *)&EapolKeyInfo));
-
-	// Choose WPA2 or not
-	if ((pEntry->AuthMode == Ndis802_11AuthModeWPA2) || (pEntry->AuthMode == Ndis802_11AuthModeWPA2PSK))
-		bWPA2 = TRUE;
-
-	// 0. Check MsgType
-	if ((MsgType > EAPOL_GROUP_MSG_2) || (MsgType < EAPOL_PAIR_MSG_1))
-	{
-		DBGPRINT(RT_DEBUG_ERROR, ("The message type is invalid(%d)! \n", MsgType));
-		return FALSE;
-	}
-				
-	// 1. Replay counter check	
- 	if (MsgType == EAPOL_PAIR_MSG_1 || MsgType == EAPOL_PAIR_MSG_3 || MsgType == EAPOL_GROUP_MSG_1)	// For supplicant
-    {
-    	// First validate replay counter, only accept message with larger replay counter.
-		// Let equal pass, some AP start with all zero replay counter
-		UCHAR	ZeroReplay[LEN_KEY_DESC_REPLAY];
-		
-        NdisZeroMemory(ZeroReplay, LEN_KEY_DESC_REPLAY);
-		if ((RTMPCompareMemory(pMsg->KeyDesc.ReplayCounter, pEntry->R_Counter, LEN_KEY_DESC_REPLAY) != 1) &&
-			(RTMPCompareMemory(pMsg->KeyDesc.ReplayCounter, ZeroReplay, LEN_KEY_DESC_REPLAY) != 0))
-    	{
-			bReplayDiff = TRUE;
-    	}						
- 	}
-	else if (MsgType == EAPOL_PAIR_MSG_2 || MsgType == EAPOL_PAIR_MSG_4 || MsgType == EAPOL_GROUP_MSG_2)	// For authenticator
-	{
-		// check Replay Counter coresponds to MSG from authenticator, otherwise discard
-    	if (!NdisEqualMemory(pMsg->KeyDesc.ReplayCounter, pEntry->R_Counter, LEN_KEY_DESC_REPLAY))
-    	{	
-			bReplayDiff = TRUE;	        
-    	}
-	}
-
-	// Replay Counter different condition
-	if (bReplayDiff)
-	{
-		// send wireless event - for replay counter different
-		if (pAd->CommonCfg.bWirelessEvent)
-			RTMPSendWirelessEvent(pAd, IW_REPLAY_COUNTER_DIFF_EVENT_FLAG, pEntry->Addr, pEntry->apidx, 0); 
-
-		if (MsgType < EAPOL_GROUP_MSG_1)
-		{
-           	DBGPRINT(RT_DEBUG_ERROR, ("Replay Counter Different in pairwise msg %d of 4-way handshake!\n", MsgType));
-		}
-		else
-		{
-			DBGPRINT(RT_DEBUG_ERROR, ("Replay Counter Different in group msg %d of 2-way handshake!\n", (MsgType - EAPOL_PAIR_MSG_4)));
-		}
-		
-		hex_dump("Receive replay counter ", pMsg->KeyDesc.ReplayCounter, LEN_KEY_DESC_REPLAY);
-		hex_dump("Current replay counter ", pEntry->R_Counter, LEN_KEY_DESC_REPLAY);	
-        return FALSE;
-	}
-
-	// 2. Verify MIC except Pairwise Msg1
-	if (MsgType != EAPOL_PAIR_MSG_1)
-	{
-		UCHAR			rcvd_mic[LEN_KEY_DESC_MIC];
-
-		// Record the received MIC for check later
-		NdisMoveMemory(rcvd_mic, pMsg->KeyDesc.KeyMic, LEN_KEY_DESC_MIC);
-		NdisZeroMemory(pMsg->KeyDesc.KeyMic, LEN_KEY_DESC_MIC);
-							
-        if (EapolKeyInfo.KeyDescVer == DESC_TYPE_TKIP)	// TKIP
-        {	
-            HMAC_MD5(pEntry->PTK, LEN_EAP_MICK, (PUCHAR)pMsg, MsgLen, mic, MD5_DIGEST_SIZE);
-        }
-        else if (EapolKeyInfo.KeyDescVer == DESC_TYPE_AES)	// AES        
-        {                        
-            HMAC_SHA1(pEntry->PTK, LEN_EAP_MICK, (PUCHAR)pMsg, MsgLen, digest, SHA1_DIGEST_SIZE);
-            NdisMoveMemory(mic, digest, LEN_KEY_DESC_MIC);
-        }
-	
-        if (!NdisEqualMemory(rcvd_mic, mic, LEN_KEY_DESC_MIC))
-        {
-			// send wireless event - for MIC different
-			if (pAd->CommonCfg.bWirelessEvent)
-				RTMPSendWirelessEvent(pAd, IW_MIC_DIFF_EVENT_FLAG, pEntry->Addr, pEntry->apidx, 0); 
-
-			if (MsgType < EAPOL_GROUP_MSG_1)
-			{
-            	DBGPRINT(RT_DEBUG_ERROR, ("MIC Different in pairwise msg %d of 4-way handshake!\n", MsgType));
-			}
-			else
-			{
-				DBGPRINT(RT_DEBUG_ERROR, ("MIC Different in group msg %d of 2-way handshake!\n", (MsgType - EAPOL_PAIR_MSG_4)));
-			}
-	
-			hex_dump("Received MIC", rcvd_mic, LEN_KEY_DESC_MIC);
-			hex_dump("Desired  MIC", mic, LEN_KEY_DESC_MIC);
-
-			return FALSE;
-        }        
-	}
-
-	// 1. Decrypt the Key Data field if GTK is included.
-	// 2. Extract the context of the Key Data field if it exist.	 
-	// The field in pairwise_msg_2_WPA1(WPA2) & pairwise_msg_3_WPA1 is clear.
-	// The field in group_msg_1_WPA1(WPA2) & pairwise_msg_3_WPA2 is encrypted.
-	if (CONV_ARRARY_TO_UINT16(pMsg->KeyDesc.KeyDataLen) > 0)
-	{		
-		// Decrypt this field		
-		if ((MsgType == EAPOL_PAIR_MSG_3 && bWPA2) || (MsgType == EAPOL_GROUP_MSG_1))
-		{					
-			if(
-				(EapolKeyInfo.KeyDescVer == DESC_TYPE_AES))
-			{
-				// AES 
-				AES_GTK_KEY_UNWRAP(&pEntry->PTK[16], KEYDATA, 
-									CONV_ARRARY_TO_UINT16(pMsg->KeyDesc.KeyDataLen),
-									pMsg->KeyDesc.KeyData);       
-			} 
-			else	  
-			{
-				INT 	i;
-				UCHAR   Key[32];
-				// Decrypt TKIP GTK
-				// Construct 32 bytes RC4 Key
-				NdisMoveMemory(Key, pMsg->KeyDesc.KeyIv, 16);
-				NdisMoveMemory(&Key[16], &pEntry->PTK[16], 16);
-				ARCFOUR_INIT(&pAd->PrivateInfo.WEPCONTEXT, Key, 32);
-				//discard first 256 bytes
-				for(i = 0; i < 256; i++)
-					ARCFOUR_BYTE(&pAd->PrivateInfo.WEPCONTEXT);
-				// Decrypt GTK. Becareful, there is no ICV to check the result is correct or not
-				ARCFOUR_DECRYPT(&pAd->PrivateInfo.WEPCONTEXT, KEYDATA, 
-								pMsg->KeyDesc.KeyData, 
-								CONV_ARRARY_TO_UINT16(pMsg->KeyDesc.KeyDataLen));       
-			}	
-
-			if (!bWPA2 && (MsgType == EAPOL_GROUP_MSG_1))
-				GroupKeyIndex = EapolKeyInfo.KeyIndex;
-			
-		}
-		else if ((MsgType == EAPOL_PAIR_MSG_2) || (MsgType == EAPOL_PAIR_MSG_3 && !bWPA2))
-		{					
-			NdisMoveMemory(KEYDATA, pMsg->KeyDesc.KeyData, CONV_ARRARY_TO_UINT16(pMsg->KeyDesc.KeyDataLen));			     
-		}
-		else
-		{
-			
-			return TRUE;
-		}
-
-		// Parse Key Data field to 
-		// 1. verify RSN IE for pairwise_msg_2_WPA1(WPA2) ,pairwise_msg_3_WPA1(WPA2)
-		// 2. verify KDE format for pairwise_msg_3_WPA2, group_msg_1_WPA2
-		// 3. update shared key for pairwise_msg_3_WPA2, group_msg_1_WPA1(WPA2)
-		if (!RTMPParseEapolKeyData(pAd, KEYDATA, 
-								  CONV_ARRARY_TO_UINT16(pMsg->KeyDesc.KeyDataLen), 
-								  GroupKeyIndex, MsgType, bWPA2, pEntry))
-		{
-			return FALSE;
-		}
-	}
-
-	return TRUE;
-	
-}
 
 #ifdef CONFIG_STA_SUPPORT
 #ifdef QOS_DLS_SUPPORT
@@ -1714,4 +1581,79 @@ BOOLEAN PeerDlsTearDownSanity(
     return TRUE;
 }
 #endif // QOS_DLS_SUPPORT //
+
+/* 
+    ==========================================================================
+    Description:
+        MLME message sanity check
+    Return:
+        TRUE if all parameters are OK, FALSE otherwise
+    ==========================================================================
+ */
+BOOLEAN PeerProbeReqSanity(
+    IN PRTMP_ADAPTER pAd, 
+    IN VOID *Msg, 
+    IN ULONG MsgLen, 
+    OUT PUCHAR pAddr2,
+    OUT CHAR Ssid[], 
+    OUT UCHAR *SsidLen, 
+    OUT BOOLEAN *bRssiRequested)
+{
+    PFRAME_802_11 Fr = (PFRAME_802_11)Msg;
+    UCHAR		*Ptr;
+    UCHAR		eid =0, eid_len = 0, *eid_data;
+	UINT		total_ie_len = 0;	
+
+    // to prevent caller from using garbage output value
+    *SsidLen = 0;
+
+    COPY_MAC_ADDR(pAddr2, &Fr->Hdr.Addr2);
+
+    if (Fr->Octet[0] != IE_SSID || Fr->Octet[1] > MAX_LEN_OF_SSID) 
+    {
+        DBGPRINT(RT_DEBUG_TRACE, ("APPeerProbeReqSanity fail - wrong SSID IE\n"));
+        return FALSE;
+    } 
+    
+    *SsidLen = Fr->Octet[1];
+    NdisMoveMemory(Ssid, &Fr->Octet[2], *SsidLen);
+	
+
+    Ptr = Fr->Octet;
+    eid = Ptr[0];
+    eid_len = Ptr[1];
+	total_ie_len = eid_len + 2;
+	eid_data = Ptr+2;
+    
+    // get variable fields from payload and advance the pointer
+	while((eid_data + eid_len) <= ((UCHAR*)Fr + MsgLen))
+    {    	
+        switch(eid)
+        {
+	        case IE_VENDOR_SPECIFIC:
+				if (eid_len <= 4)
+					break;
+#ifdef RSSI_FEEDBACK
+                if (bRssiRequested && NdisEqualMemory(eid_data, RALINK_OUI, 3) && (eid_len == 7))
+                {
+					if (*(eid_data + 3/* skip RALINK_OUI */) & 0x8)
+                    	*bRssiRequested = TRUE;
+                    break;
+                }
+#endif // RSSI_FEEDBACK //
+
+
+            default:
+                break;
+        }
+		eid = Ptr[total_ie_len];
+    	eid_len = Ptr[total_ie_len + 1];
+		eid_data = Ptr + total_ie_len + 2;
+		total_ie_len += (eid_len + 2);
+	}
+
+    return TRUE;
+}
+
+
 

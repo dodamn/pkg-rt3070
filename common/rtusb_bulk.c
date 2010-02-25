@@ -46,22 +46,6 @@ UCHAR	EpToQueue[6]={FIFO_EDCA, FIFO_EDCA, FIFO_EDCA, FIFO_EDCA, FIFO_EDCA, FIFO_
 
 //static BOOLEAN SingleBulkOut = FALSE;
 
-void RTUSB_FILL_BULK_URB (struct urb *pUrb,
-	struct usb_device *pUsb_Dev,
-	unsigned int bulkpipe,
-	void *pTransferBuf,
-	int BufSize,
-	usb_complete_t Complete,
-	void *pContext)
-{
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-	usb_fill_bulk_urb(pUrb, pUsb_Dev, bulkpipe, pTransferBuf, BufSize, (usb_complete_t)Complete, pContext);	
-#else
-	FILL_BULK_URB(pUrb, pUsb_Dev, bulkpipe, pTransferBuf, BufSize, Complete, pContext);
-#endif
-
-}
 
 VOID	RTUSBInitTxDesc(
 	IN	PRTMP_ADAPTER	pAd,
@@ -90,23 +74,13 @@ VOID	RTUSBInitTxDesc(
 
 	
 	//Initialize a tx bulk urb
-	RTUSB_FILL_BULK_URB(pUrb,
-						pObj->pUsb_Dev,
-						usb_sndbulkpipe(pObj->pUsb_Dev, pAd->BulkOutEpAddr[BulkOutPipeId]),
-						pSrc,
-						pTxContext->BulkOutSize,
-						Func,
-						pTxContext);
-						
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-	if (pTxContext->bAggregatible)
-		pUrb->transfer_dma	= (pTxContext->data_dma + TX_BUFFER_NORMSIZE + 2);
-	else
-		pUrb->transfer_dma	= pTxContext->data_dma;
-	
-	pUrb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-#endif
-
+	RTUSB_FILL_TX_BULK_URB(pUrb,
+			       pObj->pUsb_Dev,
+			       pAd->BulkOutEpAddr[BulkOutPipeId],
+			       pSrc,
+			       pTxContext->BulkOutSize,
+			       Func,
+			       pTxContext);
 }
 
 VOID	RTUSBInitHTTxDesc(
@@ -128,21 +102,14 @@ VOID	RTUSBInitHTTxDesc(
 
 	pSrc = &pTxContext->TransferBuffer->field.WirelessPacket[pTxContext->NextBulkOutPosition];
 
-	
 	//Initialize a tx bulk urb
-	RTUSB_FILL_BULK_URB(pUrb,
-						pObj->pUsb_Dev,
-						usb_sndbulkpipe(pObj->pUsb_Dev, pAd->BulkOutEpAddr[BulkOutPipeId]),
-						pSrc,
-						BulkOutSize,
-						Func,
-						pTxContext);
-						
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-	pUrb->transfer_dma	= (pTxContext->data_dma + pTxContext->NextBulkOutPosition);
-	pUrb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-#endif
-
+	RTUSB_FILL_HTTX_BULK_URB(pUrb,
+				 pObj->pUsb_Dev,
+				 pAd->BulkOutEpAddr[BulkOutPipeId],
+				 pSrc,
+				 BulkOutSize,
+				 Func,
+				 pTxContext);
 }
 
 VOID	RTUSBInitRxDesc(
@@ -162,21 +129,15 @@ VOID	RTUSBInitRxDesc(
 	else
 		RX_bulk_size = MAX_RXBULK_SIZE;
 		
+
 	//Initialize a rx bulk urb
-	RTUSB_FILL_BULK_URB(pUrb,
-						pObj->pUsb_Dev,
-						usb_rcvbulkpipe(pObj->pUsb_Dev, pAd->BulkInEpAddr),
-						&(pRxContext->TransferBuffer[pAd->NextRxBulkInPosition]),
-						RX_bulk_size - (pAd->NextRxBulkInPosition),
-						(usb_complete_t)RTUSBBulkRxComplete,
-						(void *)pRxContext);
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-	pUrb->transfer_dma	= pRxContext->data_dma + pAd->NextRxBulkInPosition;
-	pUrb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-#endif
-
-						
+	RTUSB_FILL_RX_BULK_URB(pUrb,
+			       pObj->pUsb_Dev,
+			       pAd->BulkInEpAddr,
+			       &(pRxContext->TransferBuffer[pAd->NextRxBulkInPosition]),
+			       RX_bulk_size - (pAd->NextRxBulkInPosition),
+			       RTUSBBulkRxComplete,
+			       (void *)pRxContext);
 }
 
 /*
@@ -282,6 +243,7 @@ VOID	RTUSBBulkOutDataPacket(
 			DBGPRINT(RT_DEBUG_TRACE,("RTUSBBulkOutDataPacket --> COPY PAD. CurWrite = %ld, NextBulk = %ld.   ENextBulk = %ld.\n",   pHTTXContext->CurWritePosition, pHTTXContext->NextBulkOutPosition, pHTTXContext->ENextBulkOutPosition));
 	}
 
+
 	do
 	{
 		pTxInfo = (PTXINFO_STRUC)&pWirelessPkt[TmpBulkEndPos];
@@ -294,12 +256,41 @@ VOID	RTUSBBulkOutDataPacket(
 		//if ((ThisBulkSize != 0)  && (pTxWI->AMPDU == 0))
 		if ((ThisBulkSize != 0) && (pTxWI->PHYMODE == MODE_CCK))
 		{
+#ifdef INF_AMAZON_SE
+			/*Iverson Add for AMAZON USB (RT2070 &&  RT3070) to pass WMM A2-T4 ~ A2-T10*/
+			if(OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_WMM_INUSED))
+			{
+				/*Iverson patch for WMM A5-T07 ,WirelessStaToWirelessSta do not bulk out aggregate*/
+				if(pTxWI->PacketId == 6)
+                {            
+                	pHTTXContext->ENextBulkOutPosition = TmpBulkEndPos;
+                	break;
+                }    
+				else if (((ThisBulkSize&0xffff8000) != 0) || ((ThisBulkSize&pAd->BulkOutDataSizeLimit[BulkOutPipeId]) == pAd->BulkOutDataSizeLimit[BulkOutPipeId]))
+				{	
+			//printk("===Bulkout size limit :%d ===\n",MaxBulkOutSize);
+			//DBGPRINT(RT_DEBUG_TRACE,("b mode BulkOutPipeId %d  pAd->BulkOutDataSizeLimit[BulkOutPipeId] %d  \n",BulkOutPipeId,pAd->BulkOutDataSizeLimit[BulkOutPipeId]));
+					pHTTXContext->ENextBulkOutPosition = TmpBulkEndPos;
+					break;
+				}
+				
+			}
+			else if (((ThisBulkSize&0xffff8000) != 0) || ((ThisBulkSize&0x1000) == 0x1000))
+			{
+				/* Limit BulkOut size to about 4k bytes.*/
+				pHTTXContext->ENextBulkOutPosition = TmpBulkEndPos;
+				break;
+			}
+#endif // INF_AMAZON_SE //
+#ifndef INF_AMAZON_SE
 			if (((ThisBulkSize&0xffff8000) != 0) || ((ThisBulkSize&0x1000) == 0x1000))
 			{
 				// Limit BulkOut size to about 4k bytes.
 				pHTTXContext->ENextBulkOutPosition = TmpBulkEndPos;
 				break;
 			}
+#endif // INF_AMAZON_SE //
+
 			else if (((pAd->BulkOutMaxPacketSize < 512) && ((ThisBulkSize&0xfffff800) != 0) ) /*|| ( (ThisBulkSize != 0)  && (pTxWI->AMPDU == 0))*/)
 			{
 				// For USB 1.1 or peer which didn't support AMPDU, limit the BulkOut size. 
@@ -311,11 +302,21 @@ VOID	RTUSBBulkOutDataPacket(
 		// end Iverson
 		else
 		{
+
+
 		if (((ThisBulkSize&0xffff8000) != 0) || ((ThisBulkSize&0x6000) == 0x6000))
 		{	// Limit BulkOut size to about 24k bytes.
 			pHTTXContext->ENextBulkOutPosition = TmpBulkEndPos;
 			break;
 		}
+#ifdef INF_AMAZON_SE
+		else if (((ThisBulkSize&0xffff8000) != 0) || ((ThisBulkSize&pAd->BulkOutDataSizeLimit[BulkOutPipeId]) == pAd->BulkOutDataSizeLimit[BulkOutPipeId]))
+		{	
+			//printk("===Bulkout size limit :%d ===\n",ThisBulkSize);
+			pHTTXContext->ENextBulkOutPosition = TmpBulkEndPos;
+			break;
+		}
+#endif // INF_AMAZON_SE //
 		else if (((pAd->BulkOutMaxPacketSize < 512) && ((ThisBulkSize&0xfffff800) != 0) ) /*|| ( (ThisBulkSize != 0)  && (pTxWI->AMPDU == 0))*/)
 		{	// For USB 1.1 or peer which didn't support AMPDU, limit the BulkOut size. 
 			// For performence in b/g mode, now just check for USB 1.1 and didn't care about the APMDU or not! 2008/06/04.
@@ -448,8 +449,10 @@ VOID	RTUSBBulkOutDataPacket(
 	NdisZeroMemory(pAppendant, 8);
 		ThisBulkSize += 4;
 		pHTTXContext->LastOne = TRUE;
-		if ((ThisBulkSize % pAd->BulkOutMaxPacketSize) == 0)
-			ThisBulkSize += 4;
+
+// WY , it cause Tx hang on Amazon_SE , Max said the padding is useless
+//		if ((ThisBulkSize % pAd->BulkOutMaxPacketSize) == 0)
+//			ThisBulkSize += 4;
 	pHTTXContext->BulkOutSize = ThisBulkSize;
 	
 	pAd->watchDogTxPendingCnt[BulkOutPipeId] = 1;
@@ -478,8 +481,7 @@ VOID	RTUSBBulkOutDataPacket(
 
 }
 
-
-VOID RTUSBBulkOutDataPacketComplete(purbb_t pUrb, struct pt_regs *pt_regs)
+USBHST_STATUS RTUSBBulkOutDataPacketComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs)
 {
 	PHT_TX_CONTEXT	pHTTXContext;
 	PRTMP_ADAPTER	pAd;
@@ -487,7 +489,7 @@ VOID RTUSBBulkOutDataPacketComplete(purbb_t pUrb, struct pt_regs *pt_regs)
 	UCHAR			BulkOutPipeId;
 	
 
-	pHTTXContext	= (PHT_TX_CONTEXT)pUrb->context;
+	pHTTXContext	= (PHT_TX_CONTEXT)pURB->rtusb_urb_context;
 	pAd 			= pHTTXContext->pAd;
 	pObj 			= (POS_COOKIE) pAd->OS_Cookie;
 
@@ -498,20 +500,24 @@ VOID RTUSBBulkOutDataPacketComplete(purbb_t pUrb, struct pt_regs *pt_regs)
 	switch (BulkOutPipeId)
 	{
 		case 0:
-				pObj->ac0_dma_done_task.data = (unsigned long)pUrb;
+				pObj->ac0_dma_done_task.data = (unsigned long)pURB;
 				tasklet_hi_schedule(&pObj->ac0_dma_done_task);
 				break;
 		case 1:
-				pObj->ac1_dma_done_task.data = (unsigned long)pUrb;
+				pObj->ac1_dma_done_task.data = (unsigned long)pURB;
 				tasklet_hi_schedule(&pObj->ac1_dma_done_task);
 				break;
 		case 2:
-				pObj->ac2_dma_done_task.data = (unsigned long)pUrb;
+				pObj->ac2_dma_done_task.data = (unsigned long)pURB;
 				tasklet_hi_schedule(&pObj->ac2_dma_done_task);
 				break;
 		case 3:
-				pObj->ac3_dma_done_task.data = (unsigned long)pUrb;
+				pObj->ac3_dma_done_task.data = (unsigned long)pURB;
 				tasklet_hi_schedule(&pObj->ac3_dma_done_task);
+				break;
+		case 4:
+				pObj->hcca_dma_done_task.data = (unsigned long)pURB;
+				tasklet_hi_schedule(&pObj->hcca_dma_done_task);
 				break;
 	}
 
@@ -581,7 +587,7 @@ VOID	RTUSBBulkOutNullFrame(
 }
 
 // NULL frame use BulkOutPipeId = 0
-VOID RTUSBBulkOutNullFrameComplete(purbb_t pUrb, struct pt_regs *pt_regs)
+USBHST_STATUS RTUSBBulkOutNullFrameComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs)
 {
 	PRTMP_ADAPTER		pAd;
 	PTX_CONTEXT			pNullContext;
@@ -589,12 +595,12 @@ VOID RTUSBBulkOutNullFrameComplete(purbb_t pUrb, struct pt_regs *pt_regs)
 	POS_COOKIE			pObj;
 
 	
-	pNullContext	= (PTX_CONTEXT)pUrb->context;
+	pNullContext	= (PTX_CONTEXT)pURB->rtusb_urb_context;
 	pAd 			= pNullContext->pAd;
-	Status 		= pUrb->status;
+	Status 		= pURB->rtusb_urb_status;
 
 	pObj = (POS_COOKIE) pAd->OS_Cookie;
-	pObj->null_frame_complete_task.data = (unsigned long)pUrb;
+	pObj->null_frame_complete_task.data = (unsigned long)pURB;
 	tasklet_hi_schedule(&pObj->null_frame_complete_task);
 
 }
@@ -664,11 +670,7 @@ VOID	RTUSBBulkOutMLMEPacket(
 	// Init Tx context descriptor
 	RTUSBInitTxDesc(pAd, pMLMEContext, MGMTPIPEIDX, (usb_complete_t)RTUSBBulkOutMLMEPacketComplete);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-	//For mgmt urb buffer, because we use sk_buff, so we need to notify the USB controller do dma mapping.
-	pUrb->transfer_dma	= 0;
-	pUrb->transfer_flags &= (~URB_NO_TRANSFER_DMA_MAP);
-#endif
+	RTUSB_URB_DMA_MAPPING(pUrb);
 
 	pUrb = pMLMEContext->pUrb;
 	if((ret = RTUSB_SUBMIT_URB(pUrb))!=0)
@@ -689,7 +691,7 @@ VOID	RTUSBBulkOutMLMEPacket(
 }
 
 
-VOID RTUSBBulkOutMLMEPacketComplete(purbb_t pUrb, struct pt_regs *pt_regs)
+USBHST_STATUS RTUSBBulkOutMLMEPacketComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs)
 {
 	PTX_CONTEXT			pMLMEContext;
 	PRTMP_ADAPTER		pAd;
@@ -698,13 +700,13 @@ VOID RTUSBBulkOutMLMEPacketComplete(purbb_t pUrb, struct pt_regs *pt_regs)
 	int					index;
 	
 	//DBGPRINT_RAW(RT_DEBUG_INFO, ("--->RTUSBBulkOutMLMEPacketComplete\n"));
-	pMLMEContext	= (PTX_CONTEXT)pUrb->context;
+	pMLMEContext	= (PTX_CONTEXT)pURB->rtusb_urb_context;
 	pAd 			= pMLMEContext->pAd;
 	pObj 			= (POS_COOKIE)pAd->OS_Cookie;
-	Status			= pUrb->status;
+	Status			= pURB->rtusb_urb_status;
 	index 			= pMLMEContext->SelfIdx;
 
-	pObj->mgmt_dma_done_task.data = (unsigned long)pUrb;
+	pObj->mgmt_dma_done_task.data = (unsigned long)pURB;
 	tasklet_hi_schedule(&pObj->mgmt_dma_done_task);
 }
 
@@ -768,7 +770,7 @@ VOID	RTUSBBulkOutPsPoll(
 }
 
 // PS-Poll frame use BulkOutPipeId = 0
-VOID RTUSBBulkOutPsPollComplete(purbb_t pUrb,struct pt_regs *pt_regs)
+USBHST_STATUS RTUSBBulkOutPsPollComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs)
 {
 	PRTMP_ADAPTER		pAd;
 	PTX_CONTEXT			pPsPollContext;
@@ -776,12 +778,12 @@ VOID RTUSBBulkOutPsPollComplete(purbb_t pUrb,struct pt_regs *pt_regs)
 	POS_COOKIE			pObj;
 	
 	
-	pPsPollContext= (PTX_CONTEXT)pUrb->context;
+	pPsPollContext= (PTX_CONTEXT)pURB->rtusb_urb_context;
 	pAd = pPsPollContext->pAd;
-	Status = pUrb->status;
+	Status = pURB->rtusb_urb_status;
 
 	pObj = (POS_COOKIE) pAd->OS_Cookie;
-	pObj->pspoll_frame_complete_task.data = (unsigned long)pUrb;
+	pObj->pspoll_frame_complete_task.data = (unsigned long)pURB;
 	tasklet_hi_schedule(&pObj->pspoll_frame_complete_task);
 
 }
@@ -874,7 +876,6 @@ VOID	RTUSBBulkReceive(
 		
 	while(1)
 	{
-	
 		RTMP_IRQ_LOCK(&pAd->BulkInLock, IrqFlags);
 		pRxContext = &(pAd->RxContext[pAd->NextRxBulkInReadIndex]);
 		if (((pRxContext->InUse == FALSE) && (pRxContext->Readable == TRUE)) &&
@@ -936,7 +937,7 @@ VOID	RTUSBBulkReceive(
 		Always returns STATUS_MORE_PROCESSING_REQUIRED
 	========================================================================
 */
-VOID RTUSBBulkRxComplete(purbb_t pUrb, struct pt_regs *pt_regs)
+USBHST_STATUS RTUSBBulkRxComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs)
 {
 	// use a receive tasklet to handle received packets;
 	// or sometimes hardware IRQ will be disabled here, so we can not
@@ -945,17 +946,14 @@ VOID RTUSBBulkRxComplete(purbb_t pUrb, struct pt_regs *pt_regs)
 	PRTMP_ADAPTER	pAd;
 	POS_COOKIE 		pObj;
 
-
-	pRxContext	= (PRX_CONTEXT)pUrb->context;
+	pRxContext	= (PRX_CONTEXT)pURB->rtusb_urb_context;
 	pAd 		= pRxContext->pAd;
 	pObj 		= (POS_COOKIE) pAd->OS_Cookie;
 
-	pObj->rx_done_task.data = (unsigned long)pUrb;
+	pObj->rx_done_task.data = (unsigned long)pURB;
 	tasklet_hi_schedule(&pObj->rx_done_task);
 	
 }
-
-
 
 
 /*

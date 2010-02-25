@@ -58,8 +58,14 @@
 #include <linux/if_arp.h>
 #include <linux/ctype.h>
 #include <linux/vmalloc.h>
+#include <linux/usb.h>
 #include <linux/wireless.h>
 #include <net/iw_handler.h>
+
+#ifdef INF_AMAZON_PPA
+#include <asm/amazon_se/ifx_ppa_interface.h>
+#include <asm/amazon_se/ifx_ppa_hook.h>
+#endif // INF_AMAZON_PPA //
 
 // load firmware
 #define __KERNEL_SYSCALLS__
@@ -67,6 +73,10 @@
 #include <asm/uaccess.h>
 #include <asm/types.h>
 #include <asm/unaligned.h>	// for get_unaligned()
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,29)
+#define KTHREAD_SUPPORT 1
+#endif
 
 #ifdef KTHREAD_SUPPORT
 #include <linux/err.h>
@@ -101,6 +111,12 @@
 #endif
 #endif // KTHREAD_SUPPORT //
 
+#ifdef RTMP_USB_SUPPORT
+typedef struct usb_device	*PUSB_DEV;
+typedef struct urb *purbb_t;
+typedef struct usb_ctrlrequest devctrlrequest;
+#endif
+
 /***********************************************************************************
  *	Profile related sections
  ***********************************************************************************/
@@ -110,7 +126,7 @@
 
 #ifdef RTMP_MAC_USB
 #define STA_PROFILE_PATH			"/etc/Wireless/RT2870STA/RT2870STA.dat"
-#define STA_DRIVER_VERSION			"2.1.2.0"
+#define STA_DRIVER_VERSION			"2.3.0.0"
 #ifdef MULTIPLE_CARD_SUPPORT
 #define CARD_INFO_PATH			"/etc/Wireless/RT2870STA/RT2870STACard.dat"
 #endif // MULTIPLE_CARD_SUPPORT //
@@ -226,6 +242,7 @@ struct iw_statistics *rt28xx_get_wireless_stats(
 #define MIN_NET_DEVICE_FOR_MESH			0x30
 #ifdef CONFIG_STA_SUPPORT
 #define MIN_NET_DEVICE_FOR_DLS			0x40
+#define MIN_NET_DEVICE_FOR_TDLS			0x80
 #endif // CONFIG_STA_SUPPORT //
 #define NET_DEVICE_REAL_IDX_MASK		0x0f		// for each operation mode, we maximum support 15 entities.
 
@@ -353,6 +370,7 @@ do { \
 
 #define RTMP_SEM_EVENT_INIT_LOCKED(_pSema) 	sema_init((_pSema), 0)
 #define RTMP_SEM_EVENT_INIT(_pSema)			sema_init((_pSema), 1)
+#define RTMP_SEM_EVENT_DESTORY(_pSema)		do{}while(0)
 #define RTMP_SEM_EVENT_WAIT(_pSema, _status)	((_status) = down_interruptible((_pSema)))
 #define RTMP_SEM_EVENT_UP(_pSema)			up(_pSema)
 
@@ -408,19 +426,22 @@ do { \
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
 typedef	struct pid *	THREAD_PID;
 #define	THREAD_PID_INIT_VALUE	NULL
-#define	GET_PID(_v)	find_get_pid((_v))
+// TODO: Use this IOCTL carefully when linux kernel version larger than 2.6.27, because the PID only correct when the user space task do this ioctl itself.
+//#define RTMP_GET_OS_PID(_x, _y)    _x = get_task_pid(current, PIDTYPE_PID);
+#define RTMP_GET_OS_PID(_x, _y)		do{rcu_read_lock(); _x=current->pids[PIDTYPE_PID].pid; rcu_read_unlock();}while(0)
 #define	GET_PID_NUMBER(_v)	pid_nr((_v))
-#define CHECK_PID_LEGALITY(_pid)	if (pid_nr((_pid)) >= 0)
+#define CHECK_PID_LEGALITY(_pid)	if (pid_nr((_pid)) > 0)
 #define KILL_THREAD_PID(_A, _B, _C)	kill_pid((_A), (_B), (_C))
 #else
 typedef	pid_t	THREAD_PID;
 #define	THREAD_PID_INIT_VALUE	-1
-#define	GET_PID(_v)	(_v)
+#define RTMP_GET_OS_PID(_x, _pid)		_x = _pid
 #define	GET_PID_NUMBER(_v)	(_v)
 #define CHECK_PID_LEGALITY(_pid)	if ((_pid) >= 0)
 #define KILL_THREAD_PID(_A, _B, _C)	kill_proc((_A), (_B), (_C))
 #endif
 
+typedef INT (*RTMP_OS_TASK_CALLBACK)(ULONG);
 typedef struct tasklet_struct  RTMP_NET_TASK_STRUCT;
 typedef struct tasklet_struct  *PRTMP_NET_TASK_STRUCT;
 
@@ -436,12 +457,20 @@ typedef void (*TIMER_FUNCTION)(unsigned long);
 
 
 #define OS_WAIT(_time) \
-{	int _i; \
-	long _loop = ((_time)/(1000/OS_HZ)) > 0 ? ((_time)/(1000/OS_HZ)) : 1;\
-	wait_queue_head_t _wait; \
-	init_waitqueue_head(&_wait); \
-	for (_i=0; _i<(_loop); _i++) \
-		wait_event_interruptible_timeout(_wait, 0, ONE_TICK); }
+{	\
+	if (in_interrupt()) \
+	{\
+		RTMPusecDelay(_time * 1000);\
+	}else	\
+	{\
+		int _i; \
+		long _loop = ((_time)/(1000/OS_HZ)) > 0 ? ((_time)/(1000/OS_HZ)) : 1;\
+		wait_queue_head_t _wait; \
+		init_waitqueue_head(&_wait); \
+		for (_i=0; _i<(_loop); _i++) \
+			wait_event_interruptible_timeout(_wait, 0, ONE_TICK); \
+	}\
+}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
 #define RTMP_TIME_AFTER(a,b)		\
@@ -493,6 +522,7 @@ struct os_cookie {
 	RTMP_NET_TASK_STRUCT ac1_dma_done_task;
 	RTMP_NET_TASK_STRUCT ac2_dma_done_task;
 	RTMP_NET_TASK_STRUCT ac3_dma_done_task;
+	RTMP_NET_TASK_STRUCT hcca_dma_done_task;
 	RTMP_NET_TASK_STRUCT tbtt_task;
 
 
@@ -502,7 +532,8 @@ struct os_cookie {
 	RTMP_NET_TASK_STRUCT pspoll_frame_complete_task;
 #endif // RTMP_MAC_USB //
 
-	unsigned long			apd_pid; //802.1x daemon pid
+	RTMP_OS_PID			apd_pid; //802.1x daemon pid
+	unsigned long			apd_pid_nr;
 	INT						ioctl_if_type;
 	INT 					ioctl_if;
 };
@@ -549,6 +580,7 @@ do{                                   \
 #endif
 
 #undef  ASSERT
+#ifdef DBG
 #define ASSERT(x)                                                               \
 {                                                                               \
     if (!(x))                                                                   \
@@ -556,6 +588,9 @@ do{                                   \
         printk(KERN_WARNING __FILE__ ":%d assert " #x "failed\n", __LINE__);    \
     }                                                                           \
 }
+#else
+#define ASSERT(x)
+#endif // DBG //
 
 void hex_dump(char *str, unsigned char *pSrcBufVA, unsigned int SrcBufLen);
 
@@ -568,6 +603,16 @@ void hex_dump(char *str, unsigned char *pSrcBufVA, unsigned int SrcBufLen);
 /***********************************************************************************
  * Device DMA Access related definitions and data structures.
  **********************************************************************************/
+
+#ifdef VENDOR_FEATURE2_SUPPORT
+#define DEV_ALLOC_SKB(_pAd, _Pkt, _length)	\
+	_Pkt = dev_alloc_skb(_length);			\
+	if (_Pkt != NULL) _pAd->NumOfPktAlloc ++;
+#else
+
+#define DEV_ALLOC_SKB(_pAd, _Pkt, _length)	\
+	_Pkt = dev_alloc_skb(_length);
+#endif // VENDOR_FEATURE2_SUPPORT //
 
 #ifdef RTMP_MAC_USB
 #define PCI_MAP_SINGLE(_handle, _ptr, _size, _dir) (ULONG)0
@@ -617,6 +662,9 @@ void hex_dump(char *str, unsigned char *pSrcBufVA, unsigned int SrcBufLen);
 
 #ifdef RTMP_MAC_USB
 //Patch for ASIC turst read/write bug, needs to remove after metel fix
+#define RTMP_IO_FORCE_READ32(_A, _R, _pV)								\
+	RTUSBReadMACRegister((_A), (_R), (PUINT32) (_pV))
+
 #define RTMP_IO_READ32(_A, _R, _pV)								\
 	RTUSBReadMACRegister((_A), (_R), (PUINT32) (_pV))
 
@@ -648,16 +696,21 @@ void hex_dump(char *str, unsigned char *pSrcBufVA, unsigned int SrcBufLen);
 #define PKTSRC_NDIS             0x7f
 #define PKTSRC_DRIVER           0x0f
 
+#define RTMP_OS_NETDEV_STATE_RUNNING(_pNetDev)	((_pNetDev)->flags & IFF_UP)
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29)
-#define RTMP_OS_NETDEV_SET_PRIV(_pNetDev, _pPriv)	((_pNetDev)->priv = (_pPriv))
-#define RTMP_OS_NETDEV_GET_PRIV(_pNetDev)		((_pNetDev)->priv)
-#else
-#define RTMP_OS_NETDEV_SET_PRIV(_pNetDev, _pPriv)	((_pNetDev)->ml_priv = (_pPriv))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,29)
 #define RTMP_OS_NETDEV_GET_PRIV(_pNetDev)		((_pNetDev)->ml_priv)
+#define RTMP_OS_NETDEV_SET_PRIV(_pNetDev, _pPriv)	((_pNetDev)->ml_priv = (_pPriv))
+#else
+#define RTMP_OS_NETDEV_GET_PRIV(_pNetDev)		((_pNetDev)->priv)
+#define RTMP_OS_NETDEV_SET_PRIV(_pNetDev, _pPriv)	((_pNetDev)->priv = (_pPriv))
 #endif
 #define RTMP_OS_NETDEV_GET_DEVNAME(_pNetDev)	((_pNetDev)->name)
-#define RTMP_OS_NETDEV_GET_PHYADDR(_PNETDEV)	((_PNETDEV)->dev_addr)
+#define RTMP_OS_NETDEV_GET_PHYADDR(_pNetDev)	((_pNetDev)->dev_addr)
+
+/* Get & Set NETDEV interface hardware type */
+#define RTMP_OS_NETDEV_GET_TYPE(_pNetDev)			((_pNetDev)->type)
+#define RTMP_OS_NETDEV_SET_TYPE(_pNetDev, _type)	((_pNetDev)->type = (_type))
 
 #define RTMP_OS_NETDEV_START_QUEUE(_pNetDev)	netif_start_queue((_pNetDev))
 #define RTMP_OS_NETDEV_STOP_QUEUE(_pNetDev)	netif_stop_queue((_pNetDev))
@@ -724,6 +777,16 @@ void hex_dump(char *str, unsigned char *pSrcBufVA, unsigned int SrcBufLen);
 
 
 #define OS_PKT_CLONED(_pkt)		skb_cloned(RTPKT_TO_OSPKT(_pkt))
+
+#ifdef VENDOR_FEATURE2_SUPPORT
+#define OS_PKT_CLONE(_pAd, _pkt, _src, _flag)		\
+	_src = skb_clone(RTPKT_TO_OSPKT(_pkt), _flag);	\
+	if (_src != NULL) _pAd->NumOfPktAlloc ++;
+#else
+
+#define OS_PKT_CLONE(_pAd, _pkt, _src, _flag)		\
+	_src = skb_clone(RTPKT_TO_OSPKT(_pkt), _flag);
+#endif // VENDOR_FEATURE2_SUPPORT //
 
 #define OS_NTOHS(_Val) \
 		(ntohs(_Val))
@@ -871,7 +934,24 @@ void hex_dump(char *str, unsigned char *pSrcBufVA, unsigned int SrcBufLen);
 #define RTMP_SET_PACKET_5VT(_p, _flg)   (RTPKT_TO_OSPKT(_p)->cb[CB_OFF+22] = _flg)
 #define RTMP_GET_PACKET_5VT(_p)         (RTPKT_TO_OSPKT(_p)->cb[CB_OFF+22])
 
+#define RTMP_SET_PACKET_PROTOCOL(_p, _protocol) {\
+	(RTPKT_TO_OSPKT(_p)->cb[CB_OFF+23] = (UINT8)((_protocol) & 0x00ff)); \
+	(RTPKT_TO_OSPKT(_p)->cb[CB_OFF+24] = (UINT8)(((_protocol) & 0xff00) >> 8)); \
+}
+
+#define RTMP_GET_PACKET_PROTOCOL(_p) \
+	((((UINT16)(RTPKT_TO_OSPKT(_p)->cb[CB_OFF+23])) << 8) \
+	| ((UINT16)(RTPKT_TO_OSPKT(_p)->cb[CB_OFF+24])))
+
+#ifdef INF_AMAZON_SE
+/* [CB_OFF+28], 1B, Iverson patch for WMM A5-T07 ,WirelessStaToWirelessSta do not bulk out aggregate */
+#define RTMP_SET_PACKET_NOBULKOUT(_p, _morebit)			(RTPKT_TO_OSPKT(_p)->cb[CB_OFF+28] = _morebit)
+#define RTMP_GET_PACKET_NOBULKOUT(_p)					(RTPKT_TO_OSPKT(_p)->cb[CB_OFF+28])			
+#endif // INF_AMAZON_SE //
 /* Max skb->cb = 48B = [CB_OFF+38] */
+
+
+
 
 
 
@@ -881,9 +961,6 @@ void hex_dump(char *str, unsigned char *pSrcBufVA, unsigned int SrcBufLen);
 void RTMP_GetCurrentSystemTime(LARGE_INTEGER *time);
 int rt28xx_packet_xmit(struct sk_buff *skb);
 
-
-void FlashWrite(UCHAR * p, ULONG a, ULONG b);
-void FlashRead(UCHAR * p, ULONG a, ULONG b);
 
 #if LINUX_VERSION_CODE <= 0x20402	// Red Hat 7.1
 struct net_device *alloc_netdev(int sizeof_priv, const char *mask, void (*setup)(struct net_device *));
@@ -906,5 +983,289 @@ INT rt28xx_sta_ioctl(
 
 extern int ra_mtd_write(int num, loff_t to, size_t len, const u_char *buf);
 extern int ra_mtd_read(int num, loff_t from, size_t len, u_char *buf);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,29)
+#define GET_PAD_FROM_NET_DEV(_pAd, _net_dev)	(_pAd) = (PRTMP_ADAPTER)(_net_dev)->ml_priv;
+#else
+#define GET_PAD_FROM_NET_DEV(_pAd, _net_dev)	(_pAd) = (PRTMP_ADAPTER)(_net_dev)->priv;
+#endif
+
+#ifdef RTMP_USB_SUPPORT
+
+/******************************************************************************
+
+  	USB related definitions
+
+******************************************************************************/
+
+typedef struct usb_device_id USB_DEVICE_ID;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
+#ifdef INF_AMAZON_SE
+#define BULKAGGRE_SIZE          30
+#else
+#define BULKAGGRE_SIZE          												100
+#endif // INF_AMAZON_SE //
+
+#ifndef OS_ABL_SUPPORT
+#define RT28XX_PUT_DEVICE													usb_put_dev
+#define RTUSB_ALLOC_URB(iso)												usb_alloc_urb(iso, GFP_ATOMIC)
+#define RTUSB_SUBMIT_URB(pUrb)												usb_submit_urb(pUrb, GFP_ATOMIC)
+#define RTUSB_URB_ALLOC_BUFFER(pUsb_Dev, BufSize, pDma_addr)				usb_buffer_alloc(pUsb_Dev, BufSize, GFP_ATOMIC, pDma_addr)
+#define RTUSB_URB_FREE_BUFFER(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)	usb_buffer_free(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)
+#else
+
+#define RT28XX_PUT_DEVICE													rausb_put_dev
+#define RTUSB_ALLOC_URB(iso)												rausb_alloc_urb(iso)
+#define RTUSB_SUBMIT_URB(pUrb)												rausb_submit_urb(pUrb)
+#define RTUSB_URB_ALLOC_BUFFER(pUsb_Dev, BufSize, pDma_addr)				rausb_buffer_alloc(pUsb_Dev, BufSize, GFP_ATOMIC, pDma_addr)
+#define RTUSB_URB_FREE_BUFFER(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)	rausb_buffer_free(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)
+#endif // OS_ABL_SUPPORT //
+
+#else
+#ifdef INF_AMAZON_SE
+#define BULKAGGRE_SIZE          30
+#else
+#define BULKAGGRE_SIZE          60
+#endif // INF_AMAZON_SE //
+
+#define RT28XX_PUT_DEVICE(dev_p)
+
+#ifndef OS_ABL_SUPPORT
+#define RTUSB_ALLOC_URB(iso)                                               	usb_alloc_urb(iso)
+#define RTUSB_SUBMIT_URB(pUrb)                                             	usb_submit_urb(pUrb)
+#else
+#define RTUSB_ALLOC_URB(iso)                                               	rausb_alloc_urb(iso)
+#define RTUSB_SUBMIT_URB(pUrb)                                             	rausb_submit_urb(pUrb)
+#endif // OS_ABL_SUPPORT //
+
+#define RTUSB_URB_ALLOC_BUFFER(pUsb_Dev, BufSize, pDma_addr)         		kmalloc(BufSize, GFP_ATOMIC)
+#define RTUSB_URB_FREE_BUFFER(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)  	kfree(pTransferBuf)
+#endif
+
+#ifndef OS_ABL_SUPPORT
+#define RTUSB_FREE_URB(pUrb)	usb_free_urb(pUrb)
+#else
+#define RTUSB_FREE_URB(pUrb)	rausb_free_urb(pUrb)
+#endif // OS_ABL_SUPPORT //
+
+// unlink urb
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,7)
+
+#ifndef OS_ABL_SUPPORT
+#define RTUSB_UNLINK_URB(pUrb)		usb_kill_urb(pUrb)
+#else
+#define RTUSB_UNLINK_URB(pUrb)		rausb_kill_urb(pUrb)
+#endif // OS_ABL_SUPPORT //
+
+#else
+#define RTUSB_UNLINK_URB(pUrb)		usb_unlink_urb(pUrb)
+#endif // LINUX_VERSION_CODE //
+
+// Prototypes of completion funuc.
+#if ((LINUX_VERSION_CODE < KERNEL_VERSION(2, 5, 51)) || (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 18))) 
+#define RTUSBBulkOutDataPacketComplete(Status, pURB, pt_regs)    RTUSBBulkOutDataPacketComplete(pURB)
+#define RTUSBBulkOutMLMEPacketComplete(Status, pURB, pt_regs)    RTUSBBulkOutMLMEPacketComplete(pURB)
+#define RTUSBBulkOutNullFrameComplete(Status, pURB, pt_regs)     RTUSBBulkOutNullFrameComplete(pURB)
+#define RTUSBBulkOutRTSFrameComplete(Status, pURB, pt_regs)      RTUSBBulkOutRTSFrameComplete(pURB)
+#define RTUSBBulkOutPsPollComplete(Status, pURB, pt_regs)        RTUSBBulkOutPsPollComplete(pURB)
+#define RTUSBBulkRxComplete(Status, pURB, pt_regs)               RTUSBBulkRxComplete(pURB)
+#else
+#define RTUSBBulkOutDataPacketComplete(Status, pURB, pt_regs)    RTUSBBulkOutDataPacketComplete(pURB, pt_regs)
+#define RTUSBBulkOutMLMEPacketComplete(Status, pURB, pt_regs)    RTUSBBulkOutMLMEPacketComplete(pURB, pt_regs)
+#define RTUSBBulkOutNullFrameComplete(Status, pURB, pt_regs)     RTUSBBulkOutNullFrameComplete(pURB, pt_regs)
+#define RTUSBBulkOutRTSFrameComplete(Status, pURB, pt_regs)      RTUSBBulkOutRTSFrameComplete(pURB, pt_regs)
+#define RTUSBBulkOutPsPollComplete(Status, pURB, pt_regs)        RTUSBBulkOutPsPollComplete(pURB, pt_regs)
+#define RTUSBBulkRxComplete(Status, pURB, pt_regs)               RTUSBBulkRxComplete(pURB, pt_regs)
+#endif //
+
+extern void dump_urb(struct urb *purb);
+
+#define InterlockedIncrement 	 	atomic_inc
+#define NdisInterlockedIncrement 	atomic_inc
+#define InterlockedDecrement		atomic_dec
+#define NdisInterlockedDecrement 	atomic_dec
+#define InterlockedExchange			atomic_set
+
+typedef void USBHST_STATUS;
+typedef INT32 URBCompleteStatus;
+typedef struct pt_regs pregs;
+
+USBHST_STATUS RTUSBBulkOutDataPacketComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs);
+USBHST_STATUS RTUSBBulkOutMLMEPacketComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs);
+USBHST_STATUS RTUSBBulkOutNullFrameComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs);
+USBHST_STATUS RTUSBBulkOutRTSFrameComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs);
+USBHST_STATUS RTUSBBulkOutPsPollComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs);
+USBHST_STATUS RTUSBBulkRxComplete(URBCompleteStatus Status, purbb_t pURB, pregs *pt_regs);
+
+// Fill Bulk URB Macro
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
+#define RTUSB_FILL_TX_BULK_URB(pUrb,	\
+			       pUsb_Dev,	\
+			       uEndpointAddress,		\
+			       pTransferBuf,			\
+			       BufSize,				\
+			       Complete,	\
+			       pContext)	\
+  			       {	\
+			       		usb_fill_bulk_urb(pUrb, pUsb_Dev, usb_sndbulkpipe(pUsb_Dev, uEndpointAddress),	\
+								pTransferBuf, BufSize, Complete, pContext);	\
+			       		if (pTxContext->bAggregatible)	\
+						pUrb->transfer_dma	= (pTxContext->data_dma + TX_BUFFER_NORMSIZE + 2);	\
+			       		else	\
+						pUrb->transfer_dma	= pTxContext->data_dma;	\
+			       		pUrb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;	\
+				}
+#else
+#define RTUSB_FILL_TX_BULK_URB(pUrb,	\
+			       pUsb_Dev,	\
+			       uEndpointAddress,		\
+			       pTransferBuf,			\
+			       BufSize,				\
+			       Complete,	\
+			       pContext)	\
+  			       {	\
+  			       		FILL_BULK_URB(pUrb, pUsb_Dev, usb_sndbulkpipe(pUsb_Dev, uEndpointAddress),	\
+							pTransferBuf, BufSize, Complete, pContext);	\
+			       }
+
+#endif
+
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
+#define RTUSB_FILL_HTTX_BULK_URB(pUrb,	\
+				pUsb_Dev,	\
+				uEndpointAddress,		\
+				pTransferBuf,			\
+				BufSize,				\
+				Complete,	\
+				pContext)				\
+  				{	\
+					usb_fill_bulk_urb(pUrb, pUsb_Dev, usb_sndbulkpipe(pUsb_Dev, uEndpointAddress),	\
+								pTransferBuf, BufSize, Complete, pContext);	\
+					pUrb->transfer_dma	= (pTxContext->data_dma + pTxContext->NextBulkOutPosition);	\
+					pUrb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;	\
+				}
+#else
+#define RTUSB_FILL_HTTX_BULK_URB(pUrb,	\
+				pUsb_Dev,	\
+				uEndpointAddress,		\
+				pTransferBuf,			\
+				BufSize,				\
+				Complete,	\
+				pContext)	\
+  				{	\
+					FILL_BULK_URB(pUrb, pUsb_Dev, usb_sndbulkpipe(pUsb_Dev, uEndpointAddress),	\
+								pTransferBuf, BufSize, Complete, pContext);	\
+				}
+#endif	
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
+#define RTUSB_FILL_RX_BULK_URB(pUrb,	\
+				pUsb_Dev,	\
+				uEndpointAddress,		\
+				pTransferBuf,			\
+				BufSize,				\
+				Complete,	\
+				pContext)				\
+  				{	\
+					usb_fill_bulk_urb(pUrb, pUsb_Dev, usb_rcvbulkpipe(pUsb_Dev, uEndpointAddress),	\
+								pTransferBuf, BufSize, Complete, pContext);	\
+					pUrb->transfer_dma	= pRxContext->data_dma + pAd->NextRxBulkInPosition;	\
+					pUrb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;	\
+				}
+#else
+#define RTUSB_FILL_RX_BULK_URB(pUrb,	\
+				pUsb_Dev,	\
+				uEndpointAddress,		\
+				pTransferBuf,			\
+				BufSize,				\
+				Complete,	\
+				pContext)				\
+  				{	\
+					FILL_BULK_URB(pUrb, pUsb_Dev, usb_rcvbulkpipe(pUsb_Dev, uEndpointAddress),	\
+								pTransferBuf, BufSize, Complete, pContext);	\
+				}
+#endif
+	
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
+#define RTUSB_URB_DMA_MAPPING(pUrb)	\
+	{	\
+		pUrb->transfer_dma	= 0;	\
+		pUrb->transfer_flags &= (~URB_NO_TRANSFER_DMA_MAP);	\
+	}
+#else
+#define	RTUSB_URB_DMA_MAPPING(pUrb)
+#endif
+
+#define RTUSB_CONTROL_MSG(pUsb_Dev, uEndpointAddress, Request, RequestType, Value,Index, tmpBuf, TransferBufferLength, timeout, ret)	\
+  		{	\
+			if (RequestType == DEVICE_VENDOR_REQUEST_OUT)	\
+				ret = USB_CONTROL_MSG(pUsb_Dev, usb_sndctrlpipe(pUsb_Dev, uEndpointAddress), Request, RequestType, Value, Index, tmpBuf, TransferBufferLength, timeout);	\
+			else if (RequestType == DEVICE_VENDOR_REQUEST_IN)	\
+				ret = USB_CONTROL_MSG(pUsb_Dev, usb_rcvctrlpipe(pUsb_Dev, uEndpointAddress), Request, RequestType, Value, Index, tmpBuf, TransferBufferLength, timeout);	\
+			else	\
+			{	\
+				DBGPRINT(RT_DEBUG_ERROR, ("vendor request direction is failed\n"));	\
+				ret = -1;	\
+			}	\
+		}
+		
+#define rtusb_urb_context  context
+#define rtusb_urb_status   status
+
+
+#ifndef OS_ABL_SUPPORT
+#define USB_CONTROL_MSG		usb_control_msg
+
+#else
+
+#define USB_CONTROL_MSG		rausb_control_msg
+
+extern int rausb_register(struct usb_driver * new_driver);
+extern void rausb_deregister(struct usb_driver * driver);
+
+extern struct urb *rausb_alloc_urb(int iso_packets);
+extern void rausb_free_urb(struct urb *urb);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
+extern void rausb_put_dev(struct usb_device *dev);
+extern struct usb_device *rausb_get_dev(struct usb_device *dev);
+#endif // LINUX_VERSION_CODE //
+
+extern int rausb_submit_urb(struct urb *urb);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
+#ifndef gfp_t
+#define gfp_t		INT32
+#endif // gfp_t //
+
+extern void *rausb_buffer_alloc(struct usb_device *dev,
+								size_t size,
+								gfp_t mem_flags,
+								dma_addr_t *dma);
+extern void rausb_buffer_free(struct usb_device *dev,
+								size_t size,
+								void *addr,
+								dma_addr_t dma);
+#endif // LINUX_VERSION_CODE //
+
+extern int rausb_control_msg(struct usb_device *dev,
+							unsigned int pipe,
+							__u8 request,
+							__u8 requesttype,
+							__u16 value,
+							__u16 index,
+							void *data,
+							__u16 size,
+							int timeout);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,7)
+extern void rausb_kill_urb(struct urb *urb);
+#endif // LINUX_VERSION_CODE //
+#endif // OS_ABL_SUPPORT //
+
+#endif // RTMP_USB_SUPPORT
 
 #endif // __RT_LINUX_H__ //

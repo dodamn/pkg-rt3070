@@ -40,6 +40,29 @@
 #ifndef	__RT_CONFIG_H__
 #define	__RT_CONFIG_H__
 
+#define VENDOR_FEATURE1_SUPPORT
+//#define VENDOR_FEATURE2_SUPPORT
+//#define VENDOR_FEATURE3_SUPPORT
+
+//#define MONITOR_FLAG_11N_SNIFFER_SUPPORT
+
+#ifdef VENDOR_FEATURE3_SUPPORT 
+#ifdef DOT1X_SUPPORT
+#undef DOT1X_SUPPORT
+#endif // DOT1X_SUPPORT //
+#ifdef SYSTEM_LOG_SUPPORT
+#undef SYSTEM_LOG_SUPPORT
+#endif // SYSTEM_LOG_SUPPORT //
+#ifdef LED_CONTROL_SUPPORT
+#undef LED_CONTROL_SUPPORT
+#endif // LED_CONTROL_SUPPORT //
+#ifdef WSC_LED_SUPPORT
+#undef WSC_LED_SUPPORT
+#endif // WSC_LED_SUPPORT //
+#endif // VENDOR_FEATURE3_SUPPORT //
+
+
+
 #include "rtmp_type.h"
 #include "rtmp_os.h"
 
@@ -49,26 +72,25 @@
 
 #include "oid.h"
 #include "mlme.h"
-#include "wpa.h"
 #include "crypt_md5.h"
 #include "crypt_sha2.h"
 #include "crypt_hmac.h"
+#include "crypt_aes.h"
+#include "crypt_arc4.h"
 #include "rtmp_cmd.h"
 #include "rtmp.h"
 #include "ap.h"
+#include "wpa.h"
 #include "dfs.h"
 #include "chlist.h"
 #include "spectrum.h"
-
-#ifdef MLME_EX
-#include	"mlme_ex_def.h"
-#include	"mlme_ex.h"
-#endif // MLME_EX //
 
 #include "eeprom.h"
 #if defined(RTMP_PCI_SUPPORT) || defined(RTMP_USB_SUPPORT)
 #include "rtmp_mcu.h"
 #endif
+
+
 
 #undef AP_WSC_INCLUDED
 #undef STA_WSC_INCLUDED
@@ -93,9 +115,18 @@
 
 #ifdef RALINK_28xx_QA
 #ifndef RALINK_ATE
-#error "For supporting QA GUI, please set HAS_ATE=y and HAS_28xx_QA=y."
+#error "For supporting QA GUI, please set HAS_ATE=y and HAS_QA_SUPPORT=y."
 #endif // RALINK_ATE //
 #endif // RALINK_28xx_QA //
+
+
+
+
+
+#if defined(AP_WSC_INCLUDED) || defined(STA_WSC_INCLUDED)
+#define WSC_INCLUDED
+#endif
+
 
 #ifdef CONFIG_STA_SUPPORT
 #ifdef NATIVE_WPA_SUPPLICANT_SUPPORT
@@ -112,6 +143,14 @@
 #include "vr_ikans.h"
 #endif // IKANOS_VX_1X0 //
 
+
+
+
+
+
+#ifdef CONFIG_STA_SUPPORT
+#include "sta_cfg.h"
+#endif // CONFIG_STA_SUPPORT //
 
 #ifdef RT_CFG80211_SUPPORT
 #include "cfg80211.h"
