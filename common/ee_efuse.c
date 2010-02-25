@@ -35,10 +35,9 @@
 	--------    ----------    ----------------------------------------------
 */
 
+#ifdef RTMP_EFUSE_SUPPORT
 
 #include	"rt_config.h"
-
-
 
 #define EFUSE_USAGE_MAP_START	0x2d0
 #define EFUSE_USAGE_MAP_END		0x2fc      
@@ -334,17 +333,16 @@ static VOID eFuseReadPhysical(
 NTSTATUS eFuseRead(
 	IN	PRTMP_ADAPTER	pAd,
 	IN	USHORT			Offset,
-	OUT	PUCHAR			pData,
+	OUT	PUSHORT			pData,
 	IN	USHORT			Length)
 {
-	USHORT* pOutBuf = (USHORT*)pData;
 	NTSTATUS Status = STATUS_SUCCESS;
 	UCHAR	EFSROM_AOUT;
 	int	i;
 	
 	for(i=0; i<Length; i+=2)
 	{
-		EFSROM_AOUT = eFuseReadRegisters(pAd, Offset+i, 2, &pOutBuf[i/2]);
+		EFSROM_AOUT = eFuseReadRegisters(pAd, Offset+i, 2, &pData[i/2]);
 	} 
 	return Status;
 }
@@ -765,12 +763,13 @@ static VOID eFuseWritePhysical(
 NTSTATUS eFuseWrite(  
    	IN	PRTMP_ADAPTER	pAd,
 	IN	USHORT			Offset,
-	IN	PUCHAR			pData,
+	IN	PUSHORT			pData,
 	IN	USHORT			length)
 {
 	int i;
 	USHORT* pValueX = (PUSHORT) pData;				//value ...		
-
+	PUSHORT OddWriteByteBuf;
+	OddWriteByteBuf=(PUSHORT)kmalloc(sizeof(USHORT)*2, MEM_ALLOC_FLAG);
 	// The input value=3070 will be stored as following
 	// Little-endian		S	|	S	Big-endian
 	// addr			1	0	|	0	1	
@@ -780,15 +779,27 @@ NTSTATUS eFuseWrite(
 	// Casting
 	//				3070	|	7030 (x)
 	// The swapping should be removed for big-endian
+	if((Offset%2)!=0)
+	{
+		length+=2;
+		Offset-=1;
+		eFuseRead(pAd,Offset,OddWriteByteBuf,2);
+		eFuseRead(pAd,Offset+2,(OddWriteByteBuf+1),2);
+		*OddWriteByteBuf&=0x00ff;
+		*OddWriteByteBuf|=((*pData)&0xff)<<8;
+		*(OddWriteByteBuf+1)&=0xff00;
+		*(OddWriteByteBuf+1)|=(*pData&0xff00)>>8;
+		pValueX=OddWriteByteBuf;
+		
+	}
+	
 	for(i=0; i<length; i+=2)
 	{
 		eFuseWriteRegisters(pAd, Offset+i, 2, &pValueX[i/2]);	
 	}
-
+	kfree(OddWriteByteBuf);
 	return TRUE;
 }
-
-
 
 
 /*
@@ -811,7 +822,7 @@ INT set_eFuseGetFreeBlockCount_Proc(
 	USHORT i;
 	USHORT	LogicalAddress;
 	USHORT efusefreenum=0;
-	if(!pAd->bUseEfuse)
+	if (pAd->bUseEfuse == FALSE && pAd->bFroceEEPROMBuffer == FALSE)
 		return FALSE;
 	for (i = EFUSE_USAGE_MAP_START; i <= EFUSE_USAGE_MAP_END; i+=2)
 	{
@@ -839,10 +850,12 @@ INT set_eFusedump_Proc(
 	IN	PRTMP_ADAPTER	pAd,
 	IN	PSTRING			arg)
 {
-USHORT InBuf[3];
+	USHORT InBuf[3];
 	INT i=0;
-	if(!pAd->bUseEfuse)
+	
+	if (pAd->bUseEfuse == FALSE && pAd->bFroceEEPROMBuffer == FALSE)
 		return FALSE;
+	
 	for(i =0; i<EFUSE_USAGE_MAP_END/2; i++)
 	{
 		InBuf[0] = 2*i;
@@ -867,7 +880,7 @@ INT	set_eFuseLoadFromBin_Proc(
 	RTMP_OS_FS_INFO			osfsInfo;
 	INT 						retval, memSize;
 	PSTRING					buffer, memPtr;
-	INT						i = 0,j=0,k=1;
+	INT						TotalByte= 0,ReadedByte=0,CompareBuf=1;
 	USHORT					*PDATA;
 	USHORT					DATA;
 	
@@ -899,10 +912,10 @@ INT	set_eFuseLoadFromBin_Proc(
 	else 
 	{
 		// The object must have a read method
-		while(RtmpOSFileRead(srcf, &buffer[i], 1)==1)
+		while(RtmpOSFileRead(srcf, &buffer[TotalByte], 1)==1)
 		{
-          	i++;
-			if(i>MAX_EEPROM_BIN_FILE_SIZE)
+          		TotalByte++;
+			if(TotalByte>MAX_EEPROM_BIN_FILE_SIZE)
 			{
 				DBGPRINT(RT_DEBUG_ERROR, ("--> Error reading file %s, file size too large[>%d]\n", src, MAX_EEPROM_BIN_FILE_SIZE));
 				retval = FALSE;
@@ -918,27 +931,29 @@ INT	set_eFuseLoadFromBin_Proc(
 	
 	RtmpOSFSInfoChange(&osfsInfo, FALSE);
 
-	for(j=0;j<i;j++)
+	for(ReadedByte=0;ReadedByte<TotalByte;ReadedByte++)
 	{
-		DBGPRINT(RT_DEBUG_TRACE, ("%02X ",buffer[j]&0xff));
-		if((j+1)%2==0)
-			PDATA[j/2%8]=((buffer[j]<<8)&0xff00)|(buffer[j-1]&0xff);
-		if(j%16==0)
+		DBGPRINT(RT_DEBUG_TRACE, ("%02X ",buffer[ReadedByte]&0xff));
+		if((ReadedByte+1)%2==0)
+			PDATA[ReadedByte/2%8]=((buffer[ReadedByte]<<8)&0xff00)|(buffer[ReadedByte-1]&0xff);
+		if(ReadedByte%16==0)
 		{
-			k=buffer[j];
+			CompareBuf=buffer[ReadedByte]&0xff;
+		
 		}
 		else
 		{
-			k&=buffer[j];
-			if((j+1)%16==0)
+			CompareBuf&=(buffer[ReadedByte]&0xff);
+			if((ReadedByte+1)%16==0)
 			{
-				DBGPRINT(RT_DEBUG_TRACE, (" result=%02X,blk=%02x\n",k,j/16));
-				if(k!=0xff)
-					eFuseWriteRegistersFromBin(pAd,(USHORT)j-15, 16, PDATA);
+				DBGPRINT(RT_DEBUG_TRACE, (" result=%02X,blk=%02x\n",CompareBuf,ReadedByte/16));
+
+				if(CompareBuf!=0xff)
+					eFuseWriteRegistersFromBin(pAd,(USHORT)ReadedByte-15, 16, PDATA);
 				else
 				{
-					if(eFuseReadRegisters(pAd,j, 2,(PUSHORT)&DATA)!=0x3f)
-						eFuseWriteRegistersFromBin(pAd,(USHORT)j-15, 16, PDATA);
+					if(eFuseReadRegisters(pAd,ReadedByte, 2,(PUSHORT)&DATA)!=0x3f)
+						eFuseWriteRegistersFromBin(pAd,(USHORT)ReadedByte-15, 16, PDATA);
 				}
 				/*
 				for(l=0;l<8;l++)
@@ -1286,13 +1301,18 @@ int rtmp_ee_efuse_read16(
 	IN USHORT Offset,
 	OUT USHORT *pValue)
 {
-	if(pAd->bFroceEEPROMBuffer || pAd->bEEPROMFile)
+	if (pAd->bFroceEEPROMBuffer
+#ifdef RALINK_ATE
+			||pAd->bEEPROMFile
+#endif // RALINK_ATE //
+		)
 	{
 	    DBGPRINT(RT_DEBUG_TRACE,  ("Read from EEPROM Buffer\n"));
 	    NdisMoveMemory(pValue, &(pAd->EEPROMImage[Offset]), 2);
+	    *pValue = le2cpu16(*pValue);
 	}
 	else
-	    eFuseReadRegisters(pAd, Offset, 2, pValue);
+		eFuseReadRegisters(pAd, Offset, 2, pValue);
 	return (*pValue);
 }
 
@@ -1302,13 +1322,18 @@ int rtmp_ee_efuse_write16(
 	IN USHORT Offset, 
 	IN USHORT data)
 {
-    if(pAd->bFroceEEPROMBuffer||pAd->bEEPROMFile)
+    if (pAd->bFroceEEPROMBuffer
+#ifdef RALINK_ATE
+			||pAd->bEEPROMFile
+#endif // RALINK_ATE //
+		)
     {
+    	data = le2cpu16(data);
         DBGPRINT(RT_DEBUG_TRACE,  ("Write to EEPROM Buffer\n"));
         NdisMoveMemory(&(pAd->EEPROMImage[Offset]), &data, 2);
     }
     else
-        eFuseWriteRegisters(pAd, Offset, 2, &data);
+        eFuseWrite(pAd,Offset ,&data, 2);
 	return 0;
 }
 
@@ -1318,7 +1343,7 @@ int RtmpEfuseSupportCheck(
 {
 	USHORT value;
 	
-	if (IS_RT30xx(pAd))
+	if (IS_RT30xx(pAd) || IS_RT3593(pAd))
 	{
 		eFusePhysicalReadRegisters(pAd, EFUSE_TAG, 2, &value);
 		pAd->EFuseTag = (value & 0xff);
@@ -1326,6 +1351,8 @@ int RtmpEfuseSupportCheck(
 	return 0;
 }
 
+
+#ifdef RALINK_ATE
 INT set_eFuseBufferModeWriteBack_Proc(
 	IN	PRTMP_ADAPTER	pAd,
 	IN	PSTRING			arg)
@@ -1348,6 +1375,7 @@ INT set_eFuseBufferModeWriteBack_Proc(
 		return FALSE;
 	return TRUE;
 }
+#endif // RALINK_ATE //
 
 
 /*
@@ -1387,7 +1415,7 @@ INT eFuseLoadEEPROM(
 		srcf = RtmpOSFileOpen(src, O_RDONLY, 0);
 		if (IS_FILE_OPEN_ERR(srcf)) 
 		{
-			DBGPRINT(RT_DEBUG_ERROR, ("--> Error %ld opening %s\n", -PTR_ERR(srcf),src));
+			DBGPRINT(RT_DEBUG_ERROR, ("--> Error opening %s\n", src));
 			return FALSE;
 		}
 		else 
@@ -1399,7 +1427,7 @@ INT eFuseLoadEEPROM(
 			retval =RtmpOSFileRead(srcf, (PSTRING)pAd->EEPROMImage, MAX_EEPROM_BIN_FILE_SIZE);
 			if (retval > 0)
 							{
-				RTMPSetProfileParameters(pAd, (PSTRING)pAd->EEPROMImage);
+				
 				retval = NDIS_STATUS_SUCCESS;
 			}
 			else
@@ -1452,7 +1480,7 @@ INT eFuseWriteEeeppromBuf(
 
 		if (IS_FILE_OPEN_ERR(srcf)) 
 		{
-			DBGPRINT(RT_DEBUG_ERROR, ("--> Error %ld opening %s\n", -PTR_ERR(srcf),src));
+			DBGPRINT(RT_DEBUG_ERROR, ("--> Error opening %s\n", src));
 			return FALSE;
 		}
 		else 
@@ -1536,7 +1564,7 @@ INT eFuse_init(
 	//If the used block of efuse is less than 5. We assume the default value
 	// of this efuse is empty and change to the buffer mode in odrder to 
 	//bring up interfaces successfully.
-	if(EfuseFreeBlock > (EFUSE_USAGE_MAP_END-5))
+	if(EfuseFreeBlock > (EFUSE_USAGE_MAP_SIZE-5))
 	{
 		DBGPRINT(RT_DEBUG_ERROR, ("NVM is Efuse and the information is too less to bring up interface. Force to use EEPROM Buffer Mode\n"));
 		pAd->bFroceEEPROMBuffer = TRUE;
@@ -1548,4 +1576,6 @@ INT eFuse_init(
 
 	return 0;
 }
+
+#endif // RTMP_EFUSE_SUPPORT //
 

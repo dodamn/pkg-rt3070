@@ -115,6 +115,61 @@ DOT11_REGULATORY_INFORMATION JapanRegulatoryInfo[] =
 #define JP_REGULATORY_INFO_SIZE (sizeof(JapanRegulatoryInfo) / sizeof(DOT11_REGULATORY_INFORMATION))
 
 
+UINT8 GetRegulatoryMaxTxPwr(
+	IN PRTMP_ADAPTER pAd,
+	IN UINT8 channel)
+{
+	ULONG RegulatoryClassLoop, ChIdx;
+	UINT8 RegulatoryClass;
+	UINT8 MaxRegulatoryClassNum;
+	PDOT11_REGULATORY_INFORMATION pRegulatoryClass;
+	PSTRING pCountry = pAd->CommonCfg.CountryCode;
+
+
+	if (strncmp(pCountry, "US", 2) == 0)
+	{
+		MaxRegulatoryClassNum = USA_REGULATORY_INFO_SIZE;
+		pRegulatoryClass = &USARegulatoryInfo[0];
+	}
+	else if (strncmp(pCountry, "JP", 2) == 0)
+	{
+		MaxRegulatoryClassNum = JP_REGULATORY_INFO_SIZE;
+		pRegulatoryClass = &JapanRegulatoryInfo[0];
+	}
+	else
+	{
+		DBGPRINT(RT_DEBUG_ERROR, ("%s: Unknow Country (%s)\n",
+					__FUNCTION__, pCountry));
+		return 0xff;
+	}
+
+	for (RegulatoryClassLoop = 0;
+			RegulatoryClassLoop<MAX_NUM_OF_REGULATORY_CLASS;
+			RegulatoryClassLoop++)
+	{
+		PDOT11_CHANNEL_SET pChannelSet;
+
+		RegulatoryClass = pAd->CommonCfg.RegulatoryClass[RegulatoryClassLoop];
+		if (RegulatoryClass >= MaxRegulatoryClassNum)
+		{
+			DBGPRINT(RT_DEBUG_ERROR, ("%s: %c%c Unknow Requlatory class (%d)\n",
+						__FUNCTION__, pCountry[0], pCountry[1], RegulatoryClass));
+			return 0xff;
+		}
+		pChannelSet = &pRegulatoryClass[RegulatoryClass].ChannelSet;
+		for (ChIdx=0; ChIdx<pChannelSet->NumberOfChannels; ChIdx++)
+		{
+			if (channel == pChannelSet->ChannelList[ChIdx])
+				return pChannelSet->MaxTxPwr;
+		
+		}
+		if (ChIdx == pChannelSet->NumberOfChannels)
+			return 0xff;
+	}
+
+	return 0xff;
+}
+
 CHAR RTMP_GetTxPwr(
 	IN PRTMP_ADAPTER pAd,
 	IN HTTRANSMIT_SETTING HTTxMode)
@@ -282,18 +337,23 @@ typedef struct __TX_PWR_CFG
 }
 
 
-VOID MeasureReqTabInit(
+NDIS_STATUS	MeasureReqTabInit(
 	IN PRTMP_ADAPTER pAd)
 {
+	NDIS_STATUS     Status = NDIS_STATUS_SUCCESS;
+
 	NdisAllocateSpinLock(&pAd->CommonCfg.MeasureReqTabLock);
 
 	pAd->CommonCfg.pMeasureReqTab = kmalloc(sizeof(MEASURE_REQ_TAB), GFP_ATOMIC);
 	if (pAd->CommonCfg.pMeasureReqTab)
 		NdisZeroMemory(pAd->CommonCfg.pMeasureReqTab, sizeof(MEASURE_REQ_TAB));
 	else
+	{
 		DBGPRINT(RT_DEBUG_ERROR, ("%s Fail to alloc memory for pAd->CommonCfg.pMeasureReqTab.\n", __FUNCTION__));
+		Status = NDIS_STATUS_FAILURE;
+	}
 
-	return;
+	return Status;
 }
 
 VOID MeasureReqTabExit(
@@ -500,18 +560,23 @@ VOID MeasureReqDelete(
 	return;
 }
 
-VOID TpcReqTabInit(
+NDIS_STATUS	TpcReqTabInit(
 	IN PRTMP_ADAPTER pAd)
 {
+	NDIS_STATUS     Status = NDIS_STATUS_SUCCESS;
+
 	NdisAllocateSpinLock(&pAd->CommonCfg.TpcReqTabLock);
 
 	pAd->CommonCfg.pTpcReqTab = kmalloc(sizeof(TPC_REQ_TAB), GFP_ATOMIC);
 	if (pAd->CommonCfg.pTpcReqTab)
 		NdisZeroMemory(pAd->CommonCfg.pTpcReqTab, sizeof(TPC_REQ_TAB));
 	else
+	{
 		DBGPRINT(RT_DEBUG_ERROR, ("%s Fail to alloc memory for pAd->CommonCfg.pTpcReqTab.\n", __FUNCTION__));
+		Status = NDIS_STATUS_FAILURE;
+	}
 
-	return;
+	return Status;
 }
 
 VOID TpcReqTabExit(
@@ -774,6 +839,7 @@ VOID InsertChannelRepIE(
 	UINT8 Len;
 	UINT8 IEId = IE_AP_CHANNEL_REPORT;
 	PUCHAR pChListPtr = NULL;
+	PDOT11_CHANNEL_SET pChannelSet = NULL;
 
 	Len = 1;
 	if (strncmp(pCountry, "US", 2) == 0)
@@ -784,9 +850,7 @@ VOID InsertChannelRepIE(
 						__FUNCTION__, RegulatoryClass));
 			return;
 		}
-
-		Len += USARegulatoryInfo[RegulatoryClass].ChannelSet.NumberOfChannels;
-		pChListPtr = USARegulatoryInfo[RegulatoryClass].ChannelSet.ChannelList;
+		pChannelSet = &USARegulatoryInfo[RegulatoryClass].ChannelSet;
 	}
 	else if (strncmp(pCountry, "JP", 2) == 0)
 	{
@@ -797,8 +861,7 @@ VOID InsertChannelRepIE(
 			return;
 		}
 
-		Len += JapanRegulatoryInfo[RegulatoryClass].ChannelSet.NumberOfChannels;
-		pChListPtr = JapanRegulatoryInfo[RegulatoryClass].ChannelSet.ChannelList;
+		pChannelSet = &JapanRegulatoryInfo[RegulatoryClass].ChannelSet;
 	}
 	else
 	{
@@ -807,15 +870,28 @@ VOID InsertChannelRepIE(
 		return;
 	}
 
-	MakeOutgoingFrame(pFrameBuf,	&TempLen,
-					1,				&IEId,
-					1,				&Len,
-					1,				&RegulatoryClass,
-					Len -1,			pChListPtr,
-					END_OF_ARGS);
+	/* no match channel set. */
+	if (pChannelSet == NULL)
+		return;
 
-	*pFrameLen = *pFrameLen + TempLen;
+	/* empty channel set. */
+	if (pChannelSet->NumberOfChannels == 0)
+		return;
 
+	Len += pChannelSet->NumberOfChannels;
+	pChListPtr = pChannelSet->ChannelList;
+
+	if (Len > 1)
+	{
+		MakeOutgoingFrame(pFrameBuf,	&TempLen,
+						1,				&IEId,
+						1,				&Len,
+						1,				&RegulatoryClass,
+						Len -1,			pChListPtr,
+						END_OF_ARGS);
+
+		*pFrameLen = *pFrameLen + TempLen;
+	}
 	return;
 }
 
@@ -912,50 +988,6 @@ VOID InsertTpcReportIE(
 						1,							&ElementID,
 						1,							&Len,
 						Len,						&TpcReportIE,
-						END_OF_ARGS);
-
-	*pFrameLen = *pFrameLen + TempLen;
-
-
-	return;
-}
-
-/*
-	==========================================================================
-	Description:
-		Insert Channel Switch Announcement IE into frame.
-		
-	Parametrs:
-		1. frame buffer pointer.
-		2. frame length.
-		3. channel switch announcement mode.
-		4. new selected channel.
-		5. channel switch announcement count.
-	
-	Return	: None.
-	==========================================================================
- */
-static VOID InsertChSwAnnIE(
-	IN PRTMP_ADAPTER pAd,
-	OUT PUCHAR pFrameBuf,
-	OUT PULONG pFrameLen,
-	IN UINT8 ChSwMode,
-	IN UINT8 NewChannel,
-	IN UINT8 ChSwCnt)
-{
-	ULONG TempLen;
-	ULONG Len = sizeof(CH_SW_ANN_INFO);
-	UINT8 ElementID = IE_CHANNEL_SWITCH_ANNOUNCEMENT;
-	CH_SW_ANN_INFO ChSwAnnIE;
-
-	ChSwAnnIE.ChSwMode = ChSwMode;
-	ChSwAnnIE.Channel = NewChannel;
-	ChSwAnnIE.ChSwCnt = ChSwCnt;
-
-	MakeOutgoingFrame(pFrameBuf,				&TempLen,
-						1,						&ElementID,
-						1,						&Len,
-						Len,					&ChSwAnnIE,
 						END_OF_ARGS);
 
 	*pFrameLen = *pFrameLen + TempLen;
@@ -1076,7 +1108,7 @@ VOID MakeMeasurementReqFrame(
 	IN UINT8 MeasureToken, 
 	IN UINT8 MeasureReqMode,
 	IN UINT8 MeasureReqType,
-	IN UINT8 NumOfRepetitions)
+	IN UINT16 NumOfRepetitions)
 {
 	ULONG TempLen;
 	MEASURE_REQ_INFO MeasureReqIE;
@@ -1268,6 +1300,51 @@ VOID EnqueueTPCRep(
 	return;
 }
 
+#ifdef WDS_SUPPORT
+/*
+	==========================================================================
+	Description:
+		Insert Channel Switch Announcement IE into frame.
+		
+	Parametrs:
+		1. frame buffer pointer.
+		2. frame length.
+		3. channel switch announcement mode.
+		4. new selected channel.
+		5. channel switch announcement count.
+	
+	Return	: None.
+	==========================================================================
+ */
+static VOID InsertChSwAnnIE(
+	IN PRTMP_ADAPTER pAd,
+	OUT PUCHAR pFrameBuf,
+	OUT PULONG pFrameLen,
+	IN UINT8 ChSwMode,
+	IN UINT8 NewChannel,
+	IN UINT8 ChSwCnt)
+{
+	ULONG TempLen;
+	ULONG Len = sizeof(CH_SW_ANN_INFO);
+	UINT8 ElementID = IE_CHANNEL_SWITCH_ANNOUNCEMENT;
+	CH_SW_ANN_INFO ChSwAnnIE;
+
+	ChSwAnnIE.ChSwMode = ChSwMode;
+	ChSwAnnIE.Channel = NewChannel;
+	ChSwAnnIE.ChSwCnt = ChSwCnt;
+
+	MakeOutgoingFrame(pFrameBuf,				&TempLen,
+						1,						&ElementID,
+						1,						&Len,
+						Len,					&ChSwAnnIE,
+						END_OF_ARGS);
+
+	*pFrameLen = *pFrameLen + TempLen;
+
+
+	return;
+}
+
 /*
 	==========================================================================
 	Description:
@@ -1316,6 +1393,7 @@ VOID EnqueueChSwAnn(
 
 	return;
 }
+#endif // WDS_SUPPORT //
 
 static BOOLEAN DfsRequirementCheck(
 	IN PRTMP_ADAPTER pAd,
@@ -2174,7 +2252,7 @@ INT Set_MeasureReq_Proc(
 	MakeMeasurementReqFrame(pAd, pOutBuffer, &FrameLen,
 		sizeof(MEASURE_REQ_INFO), CATEGORY_RM, RM_BASIC,
 		MeasureReqToken, MeasureReqMode.word,
-		MeasureReqType, 0);
+		MeasureReqType, 1);
 
 	MeasureReq.ChNum = MeasureCh;
 	MeasureReq.MeasureStartTime = cpu2le64(MeasureStartTime);

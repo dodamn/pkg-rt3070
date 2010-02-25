@@ -620,9 +620,11 @@ int RtmpUSBMgmtKickOut(
 	
 	BulkOutSize += 4; // Always add 4 extra bytes at every packet.
 	
+
+// WY , it cause Tx hang on Amazon_SE , Max said the padding is useless
 	// If BulkOutSize is multiple of BulkOutMaxPacketSize, add extra 4 bytes again.
-	if ((BulkOutSize % pAd->BulkOutMaxPacketSize) == 0)
-		BulkOutSize += 4;
+//	if ((BulkOutSize % pAd->BulkOutMaxPacketSize) == 0)
+//		BulkOutSize += 4;
 
 	padLen = BulkOutSize - SrcBufLen;
 	ASSERT((padLen <= RTMP_PKT_TAIL_PADDING));
@@ -687,26 +689,28 @@ VOID RtmpUSBNullFrameKickOut(
 
 		RTMPZeroMemory(&pWirelessPkt[0], 100);
 		pTxInfo = (PTXINFO_STRUC)&pWirelessPkt[0];
-		RTMPWriteTxInfo(pAd, pTxInfo, (USHORT)(sizeof(HEADER_802_11)+TXWI_SIZE), TRUE, EpToQueue[MGMTPIPEIDX], FALSE,  FALSE);
+		RTMPWriteTxInfo(pAd, pTxInfo, (USHORT)(frameLen+TXWI_SIZE), TRUE, EpToQueue[MGMTPIPEIDX], FALSE,  FALSE);
 		pTxInfo->QSEL = FIFO_EDCA;
 		pTxWI = (PTXWI_STRUC)&pWirelessPkt[TXINFO_SIZE];
-		RTMPWriteTxWI(pAd, pTxWI,  FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, 0, BSSID_WCID, (sizeof(HEADER_802_11)),
+		RTMPWriteTxWI(pAd, pTxWI,  FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, 0, BSSID_WCID, frameLen,
 			0, 0, (UCHAR)pAd->CommonCfg.MlmeTransmit.field.MCS, IFS_HTTXOP, FALSE, &pAd->CommonCfg.MlmeTransmit);
 #ifdef RT_BIG_ENDIAN
 		RTMPWIEndianChange((PUCHAR)pTxWI, TYPE_TXWI);
 #endif // RT_BIG_ENDIAN //
 
-		RTMPMoveMemory(&pWirelessPkt[TXWI_SIZE+TXINFO_SIZE], &pAd->NullFrame, sizeof(HEADER_802_11));
+		RTMPMoveMemory(&pWirelessPkt[TXWI_SIZE+TXINFO_SIZE], pNullFrame, frameLen);
 #ifdef RT_BIG_ENDIAN
 		RTMPFrameEndianChange(pAd, (PUCHAR)&pWirelessPkt[TXINFO_SIZE + TXWI_SIZE], DIR_WRITE, FALSE);
 #endif // RT_BIG_ENDIAN //
-		pAd->NullContext.BulkOutSize =  TXINFO_SIZE + TXWI_SIZE + sizeof(pAd->NullFrame) + 4;				
+		pAd->NullContext.BulkOutSize =  TXINFO_SIZE + TXWI_SIZE + frameLen + 4;				
 
 		// Fill out frame length information for global Bulk out arbitor
 		//pNullContext->BulkOutSize = TransferBufferLength;
 		DBGPRINT(RT_DEBUG_TRACE, ("SYNC - send NULL Frame @%d Mbps...\n", RateIdToMbps[pAd->CommonCfg.TxRate]));
 		RTUSB_SET_BULK_FLAG(pAd, fRTUSB_BULK_OUT_DATA_NULL);
 
+		pAd->Sequence = (pAd->Sequence+1) & MAXSEQ;
+		
 		// Kick bulk out 
 		RTUSBKickBulkOut(pAd);
 	}
@@ -738,7 +742,7 @@ PNDIS_PACKET GetPacketFromRxRing(
 	IN OUT	UINT32				*pRxPending)
 {
 	PRX_CONTEXT		pRxContext;
-	PNDIS_PACKET	pSkb;
+	PNDIS_PACKET	pNetPkt;
 	PUCHAR			pData;
 	ULONG			ThisFrameLen;
 	ULONG			RxBufferLength;
@@ -796,17 +800,17 @@ PNDIS_PACKET GetPacketFromRxRing(
 #endif // RT_BIG_ENDIAN //
 
 	// allocate a rx packet
-	pSkb = dev_alloc_skb(ThisFrameLen);
-	if (pSkb == NULL)
+	pNetPkt = RTMP_AllocateFragPacketBuffer(pAd, ThisFrameLen);
+	if (pNetPkt == NULL)
 	{
 		DBGPRINT(RT_DEBUG_ERROR,("%s():Cannot Allocate sk buffer for this Bulk-In buffer!\n", __FUNCTION__));
 		goto label_null;
 	}
 
 	// copy the rx packet
-	memcpy(skb_put(pSkb, ThisFrameLen), pData, ThisFrameLen);
-	RTPKT_TO_OSPKT(pSkb)->dev = get_netdev_from_bssid(pAd, BSS0);
-	RTMP_SET_PACKET_SOURCE(OSPKT_TO_RTPKT(pSkb), PKTSRC_NDIS);
+	memcpy(skb_put(pNetPkt, ThisFrameLen), pData, ThisFrameLen);
+	GET_OS_PKT_NETDEV(pNetPkt) = get_netdev_from_bssid(pAd, BSS0);;
+	RTMP_SET_PACKET_SOURCE(OSPKT_TO_RTPKT(pNetPkt), PKTSRC_NDIS);
 
 	// copy RxD
 	*pSaveRxD = *(PRXINFO_STRUC)(pData + ThisFrameLen);
@@ -817,7 +821,7 @@ PNDIS_PACKET GetPacketFromRxRing(
 	// update next packet read position.
 	pAd->ReadPosition += (ThisFrameLen + RT2870_RXDMALEN_FIELD_SIZE + RXINFO_SIZE);	// 8 for (RT2870_RXDMALEN_FIELD_SIZE + sizeof(RXINFO_STRUC))
 
-	return pSkb;
+	return pNetPkt;
 
 label_null:
 	
@@ -885,12 +889,14 @@ NDIS_STATUS	RTMPCheckRxError(
 	// Add Rx size to channel load counter, we should ignore error counts
 	pAd->StaCfg.CLBusyBytes += (pRxWI->MPDUtotalByteCount+ 14);
 
-	// Drop ToDs promiscous frame, it is opened due to CCX 2 channel load statistics
-	if (pHeader->FC.ToDs)
+#ifndef CLIENT_WDS
+	if (pHeader->FC.ToDs
+		)
 	{
 		DBGPRINT_RAW(RT_DEBUG_ERROR, ("Err;FC.ToDs\n"));
 		return NDIS_STATUS_FAILURE;
 	}
+#endif // CLIENT_WDS //
 
 	// Paul 04-03 for OFDM Rx length issue
 	if (pRxWI->MPDUtotalByteCount > MAX_AGGREGATION_SIZE)
@@ -908,11 +914,12 @@ NDIS_STATUS	RTMPCheckRxError(
 	if (pRxINFO->Decrypted && pRxINFO->CipherErr)
 	{
 						
-		if (((pRxINFO->CipherErr & 1) == 1) && pAd->CommonCfg.bWirelessEvent && INFRA_ON(pAd))
+		if (((pRxINFO->CipherErr & 1) == 1) && INFRA_ON(pAd))
             RTMPSendWirelessEvent(pAd, IW_ICV_ERROR_EVENT_FLAG, pAd->MacTab.Content[BSSID_WCID].Addr, BSS0, 0);			
 
-		if (((pRxINFO->CipherErr & 2) == 2) && pAd->CommonCfg.bWirelessEvent && INFRA_ON(pAd))
+		if (((pRxINFO->CipherErr & 2) == 2) && INFRA_ON(pAd))
                 RTMPSendWirelessEvent(pAd, IW_MIC_ERROR_EVENT_FLAG, pAd->MacTab.Content[BSSID_WCID].Addr, BSS0, 0);
+
 		//
 		// MIC Error
 		//
@@ -966,7 +973,7 @@ VOID RT28xxUsbStaAsicForceWakeup(
 	if (pAd->Mlme.AutoWakeupTimerRunning)
 		RTMPCancelTimer(&pAd->Mlme.AutoWakeupTimer, &Canceled);
 
-		AsicSendCommandToMcu(pAd, 0x31, 0xff, 0x00, 0x02);
+	AsicSendCommandToMcu(pAd, 0x31, 0xff, 0x00, 0x02);
 
 	OPSTATUS_CLEAR_FLAG(pAd, fOP_STATUS_DOZE);
 }
@@ -984,7 +991,7 @@ VOID RT28xxUsbStaAsicSleepThenAutoWakeup(
 	RTMPSetTimer(&pAd->Mlme.AutoWakeupTimer, AUTO_WAKEUP_TIMEOUT);
 	pAd->Mlme.AutoWakeupTimerRunning = TRUE;
 
-AsicSendCommandToMcu(pAd, 0x30, 0xff, 0xff, 0x02);   // send POWER-SAVE command to MCU. Timeout 40us.
+	AsicSendCommandToMcu(pAd, 0x30, 0xff, 0xff, 0x02);   // send POWER-SAVE command to MCU. Timeout 40us.
 
 	OPSTATUS_SET_FLAG(pAd, fOP_STATUS_DOZE);
 

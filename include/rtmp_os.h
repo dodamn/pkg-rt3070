@@ -44,6 +44,8 @@
 
 
 
+
+
 /*
 	This data structure mainly strip some callback function defined in 
 	"struct net_device" in kernel source "include/linux/netdevice.h".
@@ -59,6 +61,8 @@ typedef struct _RTMP_OS_NETDEV_OP_HOOK_
 	void			*ioctl;
 	void			*get_stats;
 	void			*priv;
+	void			*get_wstats;
+	void			*iw_handler;
 	int			priv_flags;
 	unsigned char devAddr[6];
 	unsigned char	devName[16];
@@ -94,5 +98,26 @@ typedef struct _RTMP_OS_TASK_
 	BOOLEAN					kthread_running;
 #endif
 }RTMP_OS_TASK;
+
+
+int RtmpOSIRQRequest(IN PNET_DEV pNetDev);
+int RtmpOSIRQRelease(IN PNET_DEV pNetDev);
+
+#ifndef OS_ABL_SUPPORT
+#define RTMP_MATOpsInit(__pAd)
+#define RTMP_MATPktRxNeedConvert(__pAd, __pDev)				\
+	MATPktRxNeedConvert(__pAd, __pDev)
+#define RTMP_MATEngineRxHandle(__pAd, __pPkt, __InfIdx)		\
+	MATEngineRxHandle(__pAd, __pPkt, __InfIdx)
+#else
+
+#define RTMP_MATOpsInit(__pAd)								\
+	(__pAd)->MATPktRxNeedConvert = MATPktRxNeedConvert;		\
+	(__pAd)->MATEngineRxHandle = MATEngineRxHandle;
+#define RTMP_MATPktRxNeedConvert(__pAd, __pDev)				\
+	((__pAd)->MATPktRxNeedConvert(__pAd, __pDev))
+#define RTMP_MATEngineRxHandle(__pAd, __pPkt, __InfIdx)		\
+	((__pAd)->MATEngineRxHandle(__pAd, __pPkt, __InfIdx))
+#endif // OS_ABL_SUPPORT //
 
 #endif // __RMTP_OS_H__ //

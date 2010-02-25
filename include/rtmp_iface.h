@@ -54,8 +54,8 @@ typedef struct _INF_PCI_CONFIG_
 
 typedef struct _INF_USB_CONFIG_
 {
-	UINT8                BulkInEpAddr;		// bulk-in endpoint address
-	UINT8                BulkOutEpAddr[6];	// bulk-out endpoint address
+	unsigned char BulkInEpAddr;		// bulk-in endpoint address
+	unsigned char BulkOutEpAddr[6];	// bulk-out endpoint address
 }INF_USB_CONFIG;
 
 
@@ -72,6 +72,7 @@ typedef enum _RTMP_INF_TYPE_
 	RTMP_DEV_INF_PCI = 1,
 	RTMP_DEV_INF_USB = 2,
 	RTMP_DEV_INF_RBUS = 4,
+	RTMP_DEV_INF_PCIE = 5,
 }RTMP_INF_TYPE;
 
 

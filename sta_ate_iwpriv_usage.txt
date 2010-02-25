@@ -421,7 +421,7 @@ RT28xx linux driver will leave ATE mode either ated is killed or Windows GUI is 
 2. In the Windows host, run WinPcap_4_0.exe for the QA GUI or ./RT2880_ATE/RaUI.exe(please unrar "RT2880_ATE.rar" to get it).
 
 4.3  How to use ated for ATE purpose
-0. First you should set both "HAS_ATE=y" and "HAS_28xx_QA=y" in the file ~/Module/os/linux/config.mk and compile the driver.
+0. First you should set both "HAS_ATE=y" and "HAS_QA_SUPPORT=y" in the file ~/Module/os/linux/config.mk and compile the driver.
 1. Modify the Makefile according to our target "PLATFORM".
 2. Change the path of "CROSS_COMPILE" if needed.
 3. Then type 'make' command to compile the source code of the daemon.

@@ -41,9 +41,11 @@
 
 
 #define MAX_MEASURE_REQ_TAB_SIZE		32
+/* Size of hash tab must be power of 2. */
 #define MAX_HASH_MEASURE_REQ_TAB_SIZE	MAX_MEASURE_REQ_TAB_SIZE
 
 #define MAX_TPC_REQ_TAB_SIZE			32
+/* Size of hash tab must be power of 2. */
 #define MAX_HASH_TPC_REQ_TAB_SIZE		MAX_TPC_REQ_TAB_SIZE
 
 #define MIN_RCV_PWR				100		/* Negative value ((dBm) */
@@ -51,8 +53,8 @@
 #define TPC_REQ_AGE_OUT			500		/* ms */
 #define MQ_REQ_AGE_OUT			500		/* ms */
 
-#define TPC_DIALOGTOKEN_HASH_INDEX(_DialogToken)	((_DialogToken) % MAX_HASH_TPC_REQ_TAB_SIZE)
-#define MQ_DIALOGTOKEN_HASH_INDEX(_DialogToken)		((_DialogToken) % MAX_MEASURE_REQ_TAB_SIZE)
+#define TPC_DIALOGTOKEN_HASH_INDEX(_DialogToken)	((_DialogToken) & (MAX_HASH_TPC_REQ_TAB_SIZE - 1))
+#define MQ_DIALOGTOKEN_HASH_INDEX(_DialogToken)		((_DialogToken) & (MAX_MEASURE_REQ_TAB_SIZE - 1))
 
 typedef struct _MEASURE_REQ_ENTRY
 {
@@ -112,23 +114,23 @@ typedef struct _DOT11_REGULATORY_INFORMATION
 #define RM_NOISE_HISTOGRAM		4
 
 
-typedef struct PACKED _TPC_REPORT_INFO
+typedef struct GNU_PACKED _TPC_REPORT_INFO
 {
 	UINT8 TxPwr;
 	UINT8 LinkMargin;
 } TPC_REPORT_INFO, *PTPC_REPORT_INFO;
 
-typedef struct PACKED _CH_SW_ANN_INFO
+typedef struct GNU_PACKED _CH_SW_ANN_INFO
 {
 	UINT8 ChSwMode;
 	UINT8 Channel;
 	UINT8 ChSwCnt;
 } CH_SW_ANN_INFO, *PCH_SW_ANN_INFO;
 
-typedef union PACKED _MEASURE_REQ_MODE
+typedef union GNU_PACKED _MEASURE_REQ_MODE
 {
 #ifdef RT_BIG_ENDIAN
-	struct PACKED
+	struct GNU_PACKED
 	{
 
 		UINT8 :3;
@@ -139,7 +141,7 @@ typedef union PACKED _MEASURE_REQ_MODE
 		UINT8 Parallel:1;
 	} field;
 #else
-	struct PACKED
+	struct GNU_PACKED
 	{
 		UINT8 Parallel:1;
 		UINT8 Enable:1;
@@ -152,14 +154,14 @@ typedef union PACKED _MEASURE_REQ_MODE
 	UINT8 word;
 } MEASURE_REQ_MODE, *PMEASURE_REQ_MODE;
 
-typedef struct PACKED _MEASURE_REQ
+typedef struct GNU_PACKED _MEASURE_REQ
 {
 	UINT8 ChNum;
 	UINT64 MeasureStartTime;
 	UINT16 MeasureDuration;
 } MEASURE_REQ, *PMEASURE_REQ;
 
-typedef struct PACKED _MEASURE_REQ_INFO
+typedef struct GNU_PACKED _MEASURE_REQ_INFO
 {
 	UINT8 Token;
 	MEASURE_REQ_MODE ReqMode;
@@ -167,10 +169,10 @@ typedef struct PACKED _MEASURE_REQ_INFO
 	UINT8 Oct[0];
 } MEASURE_REQ_INFO, *PMEASURE_REQ_INFO;
 
-typedef union PACKED _MEASURE_BASIC_REPORT_MAP
+typedef union GNU_PACKED _MEASURE_BASIC_REPORT_MAP
 {
 #ifdef RT_BIG_ENDIAN
-	struct PACKED
+	struct GNU_PACKED
 	{
 		UINT8 Rev:3;
 
@@ -181,7 +183,7 @@ typedef union PACKED _MEASURE_BASIC_REPORT_MAP
 		UINT8 BSS:1;
 	} field;
 #else
-	struct PACKED
+	struct GNU_PACKED
 	{
 		UINT8 BSS:1;
 
@@ -195,7 +197,7 @@ typedef union PACKED _MEASURE_BASIC_REPORT_MAP
 	UINT8 word;
 } MEASURE_BASIC_REPORT_MAP, *PMEASURE_BASIC_REPORT_MAP;
 
-typedef struct PACKED _MEASURE_BASIC_REPORT
+typedef struct GNU_PACKED _MEASURE_BASIC_REPORT
 {
 	UINT8 ChNum;
 	UINT64 MeasureStartTime;
@@ -203,7 +205,7 @@ typedef struct PACKED _MEASURE_BASIC_REPORT
 	MEASURE_BASIC_REPORT_MAP Map;
 } MEASURE_BASIC_REPORT, *PMEASURE_BASIC_REPORT;
 
-typedef struct PACKED _MEASURE_CCA_REPORT
+typedef struct GNU_PACKED _MEASURE_CCA_REPORT
 {
 	UINT8 ChNum;
 	UINT64 MeasureStartTime;
@@ -211,7 +213,7 @@ typedef struct PACKED _MEASURE_CCA_REPORT
 	UINT8 CCA_Busy_Fraction;
 } MEASURE_CCA_REPORT, *PMEASURE_CCA_REPORT;
 
-typedef struct PACKED _MEASURE_RPI_REPORT
+typedef struct GNU_PACKED _MEASURE_RPI_REPORT
 {
 	UINT8 ChNum;
 	UINT64 MeasureStartTime;
@@ -219,9 +221,9 @@ typedef struct PACKED _MEASURE_RPI_REPORT
 	UINT8 RPI_Density[8];
 } MEASURE_RPI_REPORT, *PMEASURE_RPI_REPORT;
 
-typedef union PACKED _MEASURE_REPORT_MODE
+typedef union GNU_PACKED _MEASURE_REPORT_MODE
 {
-	struct PACKED
+	struct GNU_PACKED
 	{
 #ifdef RT_BIG_ENDIAN
 		UINT8 Rev:5;
@@ -238,7 +240,7 @@ typedef union PACKED _MEASURE_REPORT_MODE
 	UINT8 word;
 } MEASURE_REPORT_MODE, *PMEASURE_REPORT_MODE;
 
-typedef struct PACKED _MEASURE_REPORT_INFO
+typedef struct GNU_PACKED _MEASURE_REPORT_INFO
 {
 	UINT8 Token;
 	UINT8 ReportMode;
@@ -246,7 +248,7 @@ typedef struct PACKED _MEASURE_REPORT_INFO
 	UINT8 Octect[0];
 } MEASURE_REPORT_INFO, *PMEASURE_REPORT_INFO;
 
-typedef struct PACKED _QUIET_INFO
+typedef struct GNU_PACKED _QUIET_INFO
 {
 	UINT8 QuietCnt;
 	UINT8 QuietPeriod;

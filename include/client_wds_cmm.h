@@ -25,30 +25,31 @@
  *************************************************************************
 
 	Module Name:
-	mlme_ex_def.h
+	client_wds_cmm.h
 
 	Abstract:
-
-	Revision History:
-	Who			When			What
-	--------	----------		----------------------------------------------
-	Fonchi		2007-06-25		Extend original mlme APIs to support multi-entries
-	
 */
-#ifndef __MLME_EX_DEF_H__
-#define __MLME_EX_DEF_H__
+
+#ifndef __CLIENT_WDS_CMM_H__
+#define __CLIENT_WDS_CMM_H__
+
+#include "rtmp_def.h"
+
+#ifdef CLIENT_WDS
 
 
-typedef VOID (*STATE_MACHINE_FUNC_EX)(VOID *Adaptor, MLME_QUEUE_ELEM *Elem, PULONG pCurrState, USHORT Idx);
+#define CLI_WDS_ENTRY_AGEOUT 5000  /* seconds */
 
-typedef struct _STA_STATE_MACHINE_EX
-{
-	ULONG					Base;
-	ULONG					NrState;
-	ULONG					NrMsg;
-	ULONG					CurrState;
-	STATE_MACHINE_FUNC_EX	*TransFunc;
-} STATE_MACHINE_EX, *PSTA_STATE_MACHINE_EX;
+#define CLIWDS_POOL_SIZE 128
+#define CLIWDS_HASH_TAB_SIZE 64  /* the legth of hash table must be power of 2. */
+typedef struct _CLIWDS_PROXY_ENTRY {
+	struct _CLIWDS_PROXY_ENTRY * pNext;
+	ULONG LastRefTime;
+	SHORT Aid;
+	UCHAR Addr[MAC_ADDR_LEN];
+} CLIWDS_PROXY_ENTRY, *PCLIWDS_PROXY_ENTRY;
 
-#endif // __MLME_EX_DEF_H__ //
+#endif // CLIENT_WDS //
+
+#endif // __CLIENT_WDS_CMM_H__ //
 

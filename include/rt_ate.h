@@ -45,7 +45,6 @@
 
 
 #ifdef RTMP_MAC_USB
-
 #define ATE_BBP_IO_READ8_BY_REG_ID(_A, _I, _pV)    RTMP_BBP_IO_READ8_BY_REG_ID(_A, _I, _pV)
 #define ATE_BBP_IO_WRITE8_BY_REG_ID(_A, _I, _V)    RTMP_BBP_IO_WRITE8_BY_REG_ID(_A, _I, _V)
 
@@ -57,10 +56,14 @@
 		if(1 /*!(in_interrupt() & 0xffff0000)*/)	\
 			RTMP_IRQ_UNLOCK((pLock), IrqFlags);
 
+
+#ifdef LINUX
 // Prototypes of completion funuc.
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 #define ATE_RTUSBBulkOutDataPacketComplete(purb, pt_regs)    ATE_RTUSBBulkOutDataPacketComplete(purb)
 #endif
+#endif // LINUX //
+
 		
 VOID ATE_RTUSBBulkOutDataPacketComplete(
 	IN purbb_t purb,
@@ -81,11 +84,10 @@ INT ATEResetBulkOut(
 	IN PRTMP_ADAPTER	pAd);
 #endif // RTMP_MAC_USB //
 
-#ifdef RT30xx
-#define ATE_RF_IO_READ8_BY_REG_ID(_A, _I, _pV)     RTMP_RF_IO_READ8_BY_REG_ID(_A, _I, _pV)
-#define ATE_RF_IO_WRITE8_BY_REG_ID(_A, _I, _V)     RTMP_RF_IO_WRITE8_BY_REG_ID(_A, _I, _V)
-#endif // RT30xx //
-
+#ifdef RTMP_RF_RW_SUPPORT
+#define ATE_RF_IO_READ8_BY_REG_ID(_A, _I, _pV)     RT30xxReadRFRegister(_A, _I, _pV)
+#define ATE_RF_IO_WRITE8_BY_REG_ID(_A, _I, _V)     RT30xxWriteRFRegister(_A, _I, _V)
+#endif // RTMP_RF_RW_SUPPORT //
 
 VOID rt_ee_read_all(
 	IN  PRTMP_ADAPTER   pAd,
@@ -122,6 +124,7 @@ INT	Set_ATE_TX_POWER0_Proc(
 INT	Set_ATE_TX_POWER1_Proc(
 	IN	PRTMP_ADAPTER	pAd,
 	IN	PSTRING			arg);
+
 
 INT	Set_ATE_TX_Antenna_Proc(
 	IN	PRTMP_ADAPTER	pAd,
@@ -168,6 +171,7 @@ INT Set_ATE_Read_RF_Proc(
 	IN	PRTMP_ADAPTER	pAd, 
 	IN	PSTRING			arg);
 
+#ifndef RTMP_RF_RW_SUPPORT
 INT Set_ATE_Write_RF1_Proc(
 	IN	PRTMP_ADAPTER	pAd, 
 	IN	PSTRING			arg);
@@ -183,6 +187,7 @@ INT Set_ATE_Write_RF3_Proc(
 INT Set_ATE_Write_RF4_Proc(
 	IN	PRTMP_ADAPTER	pAd, 
 	IN	PSTRING			arg);
+#endif // RTMP_RF_RW_SUPPORT //
 
 INT Set_ATE_Load_E2P_Proc(
 	IN	PRTMP_ADAPTER	pAd, 
@@ -260,9 +265,6 @@ INT Set_RFWrite_Proc(
 
 VOID ATEAsicSwitchChannel(
 	IN PRTMP_ADAPTER pAd); 
-
-VOID ATEAsicAdjustTxPower(
-	IN PRTMP_ADAPTER pAd);
 
 VOID ATEDisableAsicProtect(
 	IN		PRTMP_ADAPTER	pAd);

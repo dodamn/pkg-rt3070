@@ -63,7 +63,7 @@
 #define RT2870_RXDMALEN_FIELD_SIZE	4
 
 #ifdef RT_BIG_ENDIAN
-typedef	struct	PACKED _RXINFO_STRUC {
+typedef	struct	GNU_PACKED _RXINFO_STRUC {
 	UINT32		PlcpSignal:12;
 	UINT32		LastAMSDU:1;
 	UINT32		CipherAlg:1;
@@ -86,7 +86,7 @@ typedef	struct	PACKED _RXINFO_STRUC {
 	UINT32		BA:1;
 }	RXINFO_STRUC, *PRXINFO_STRUC, RT28XX_RXD_STRUC, *PRT28XX_RXD_STRUC;
 #else
-typedef	struct	PACKED _RXINFO_STRUC {
+typedef	struct	GNU_PACKED _RXINFO_STRUC {
 	UINT32		BA:1;
 	UINT32		DATA:1;
 	UINT32		NULLDATA:1;
@@ -198,7 +198,7 @@ typedef struct _TX_CONTEXT
 	UCHAR			Rsv[2];
 	ULONG			DataOffset;
 	UINT			TxRate;
-	dma_addr_t		data_dma;		// urb dma on linux
+	dma_addr_t		data_dma;
 
 }	TX_CONTEXT, *PTX_CONTEXT, **PPTX_CONTEXT;
 
@@ -246,7 +246,7 @@ typedef struct _RX_CONTEXT
 	BOOLEAN				InUse;			// USB Hardware Occupied. Wait for USB HW to put packet. 
 	BOOLEAN				Readable;		// Receive Complete back. OK for driver to indicate receiving packet. 
 	BOOLEAN				IRPPending;		// TODO: To be removed
-	atomic_t			IrpLock;
+	//atomic_t				IrpLock;
 	NDIS_SPIN_LOCK		RxContextLock;
 	dma_addr_t			data_dma;		// urb dma on linux
 }	RX_CONTEXT, *PRX_CONTEXT;
@@ -354,18 +354,18 @@ typedef struct _RX_CONTEXT
 	{	if ((pAd->CommonCfg.bHardwareRadio == TRUE) && 					\
 			(!RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_NIC_NOT_EXIST)) &&		\
 			(!RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_HALT_IN_PROGRESS))) {	\
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_CHECK_GPIO, NULL, 0); } }
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_CHECK_GPIO, NULL, 0); } }
 
 #define RTMP_MLME_STA_QUICK_RSP_WAKE_UP(pAd)	\
-	{	RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_QKERIODIC_EXECUT, NULL, 0);	\
+	{	RTEnqueueInternalCmd(pAd, CMDTHREAD_QKERIODIC_EXECUT, NULL, 0);	\
 		RTUSBMlmeUp(pAd); }
 
 #define RTMP_MLME_RESET_STATE_MACHINE(pAd)	\
-		        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_RESET_CONF, 0, NULL);	\
+		        MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MT2_RESET_CONF, 0, NULL, 0);	\
 		        RTUSBMlmeUp(pAd);
 
 #define RTMP_HANDLE_COUNTER_MEASURE(_pAd, _pEntry)		\
-	{	RTUSBEnqueueInternalCmd(_pAd, CMDTHREAD_802_11_COUNTER_MEASURE, _pEntry, sizeof(MAC_TABLE_ENTRY));	\
+	{	RTEnqueueInternalCmd(_pAd, CMDTHREAD_802_11_COUNTER_MEASURE, _pEntry, sizeof(MAC_TABLE_ENTRY));	\
 		RTUSBMlmeUp(_pAd);									\
 	}
 
@@ -392,7 +392,7 @@ typedef struct _RX_CONTEXT
 		{ \
 			USHORT _psm_val; \
 			_psm_val = _val; \
-			RTUSBEnqueueInternalCmd(_pAd, CMDTHREAD_SET_PSM_BIT, &(_psm_val), sizeof(USHORT)); \
+			RTEnqueueInternalCmd(_pAd, CMDTHREAD_SET_PSM_BIT, &(_psm_val), sizeof(USHORT)); \
 		}\
 	}
 #endif // CONFIG_STA_SUPPORT //
@@ -403,5 +403,104 @@ typedef struct _RX_CONTEXT
 #define RTMP_MLME_RADIO_OFF(pAd) \
     RT28xxUsbMlmeRadioOFF(pAd);
 
+/* MAC Search table */
+// add this entry into ASIC RX WCID search table
+#define RTMP_STA_ENTRY_ADD(pAd, pEntry)							\
+{																\
+	RT_SET_ASIC_WCID	Info;									\
+																\
+	Info.WCID = pEntry->Aid;									\
+	NdisMoveMemory(Info.Addr, pEntry->Addr, MAC_ADDR_LEN);		\
+																\
+	RTEnqueueInternalCmd(pAd, CMDTHREAD_SET_CLIENT_MAC_ENTRY, 	\
+							&Info, sizeof(RT_SET_ASIC_WCID));	\
+}
+
+/* ----------------- Security Related MACRO ----------------- */
+
+/* Set Asic WCID Attribute table */
+#define RTMP_SET_WCID_SEC_INFO(_pAd, _BssIdx, _KeyIdx, _CipherAlg, _Wcid, _KeyTabFlag)	\
+{																						\
+	RT_ASIC_WCID_SEC_INFO Info;															\
+																						\
+	Info.BssIdx = _BssIdx;																\
+	Info.KeyIdx = _KeyIdx;																\
+	Info.CipherAlg = _CipherAlg;														\
+	Info.Wcid = _Wcid;																	\
+	Info.KeyTabFlag = _KeyTabFlag;														\
+																						\
+	RTEnqueueInternalCmd(_pAd, CMDTHREAD_SET_WCID_SEC_INFO, 							\
+							&Info, sizeof(RT_ASIC_WCID_SEC_INFO));						\
+}
+
+/* Set Asic WCID IV/EIV table */
+#define RTMP_ASIC_WCID_IVEIV_TABLE(_pAd, _Wcid, _uIV, _uEIV)	\
+{																\
+	RT_ASIC_WCID_IVEIV_ENTRY	Info;							\
+																\
+	Info.Wcid = _Wcid;											\
+	Info.Iv = _uIV;												\
+	Info.Eiv = _uEIV;											\
+																\
+	RTEnqueueInternalCmd(_pAd, CMDTHREAD_SET_ASIC_WCID_IVEIV, 	\
+							&Info, 								\
+							sizeof(RT_ASIC_WCID_IVEIV_ENTRY));	\
+}
+
+/* Set Asic WCID Attribute table */
+#define RTMP_ASIC_WCID_ATTR_TABLE(_pAd, _BssIdx, _KeyIdx, _CipherAlg, _Wcid, _KeyTabFlag)	\
+{																							\
+	RT_ASIC_WCID_ATTR_ENTRY Info;															\
+																							\
+	Info.BssIdx = _BssIdx;																	\
+	Info.KeyIdx = _KeyIdx;																	\
+	Info.CipherAlg = _CipherAlg;															\
+	Info.Wcid = _Wcid;																		\
+	Info.KeyTabFlag = _KeyTabFlag;															\
+																							\
+	RTEnqueueInternalCmd(_pAd, CMDTHREAD_SET_ASIC_WCID_ATTR, 								\
+							&Info, sizeof(RT_ASIC_WCID_ATTR_ENTRY));						\
+}
+
+/* Set Asic Pairwise key table */
+#define RTMP_ASIC_PAIRWISE_KEY_TABLE(_pAd, _WCID, _pCipherKey)			\
+{																		\
+	RT_ASIC_PAIRWISE_KEY	Info;										\
+																		\
+	Info.WCID = _WCID;													\
+	NdisMoveMemory(&Info.CipherKey, _pCipherKey, sizeof(CIPHER_KEY));	\
+																		\
+	RTEnqueueInternalCmd(_pAd, CMDTHREAD_SET_ASIC_PAIRWISE_KEY,			\
+							&Info, sizeof(RT_ASIC_PAIRWISE_KEY));		\
+}
+
+/* Set Asic Shared key table */
+#define RTMP_ASIC_SHARED_KEY_TABLE(_pAd, _BssIndex, _KeyIdx, _pCipherKey) 	\
+{																			\
+	RT_ASIC_SHARED_KEY 		Info;											\
+																			\
+	Info.BssIndex = _BssIndex;												\
+	Info.KeyIdx = _KeyIdx;													\
+	NdisMoveMemory(&Info.CipherKey, _pCipherKey, sizeof(CIPHER_KEY));		\
+																			\
+	RTEnqueueInternalCmd(_pAd, CMDTHREAD_SET_ASIC_SHARED_KEY,				\
+							&Info, sizeof(RT_ASIC_SHARED_KEY));				\
+}
+
+#ifdef CONFIG_STA_SUPPORT
+/* Set Port Secured */
+#define RTMP_SET_PORT_SECURED(_pAd) 										\
+{																			\
+	RTEnqueueInternalCmd(_pAd, CMDTHREAD_SET_PORT_SECURED, NULL, 0);		\
+}
+#endif // CONFIG_STA_SUPPORT //
+
+/* Remove Pairwise Key table */
+#define RTMP_REMOVE_PAIRWISE_KEY_ENTRY(_pAd, _Wcid)										\
+{																						\
+	UCHAR _tWcid =_Wcid;																\
+	RTEnqueueInternalCmd(_pAd, CMDTHREAD_REMOVE_PAIRWISE_KEY, &(_tWcid), sizeof(UCHAR));\
+}
 
 #endif //__MAC_USB_H__ //
+

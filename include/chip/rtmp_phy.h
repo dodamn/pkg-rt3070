@@ -74,6 +74,38 @@
 #define RF_R29			29
 #define RF_R30			30
 #define RF_R31			31
+#define	RF_R32					    32
+#define	RF_R33					    33
+#define	RF_R34					    34
+#define	RF_R35					    35
+#define	RF_R36					    36
+#define	RF_R37					    37
+#define	RF_R38					    38
+#define	RF_R39					    39
+#define	RF_R40					    40
+#define	RF_R41					    41
+#define	RF_R42					    42
+#define	RF_R43					    43
+#define	RF_R44					    44
+#define	RF_R45					    45
+#define	RF_R46					    46
+#define	RF_R47					    47
+#define	RF_R48					    48
+#define	RF_R49					    49
+#define	RF_R50					    50
+#define	RF_R51					    51
+#define	RF_R52					    52
+#define	RF_R53					    53
+#define	RF_R54					    54
+#define	RF_R55					    55
+#define	RF_R56					    56
+#define	RF_R57					    57
+#define	RF_R58					    58
+#define	RF_R59					    59
+#define	RF_R60					    60
+#define	RF_R61					    61
+#define	RF_R62					    62
+#define	RF_R63					    63
 
 
 // value domain of pAd->RfIcType
@@ -86,6 +118,9 @@
 #define RFIC_3021                   7       // 2.4G 1T2R
 #define RFIC_3022                   8       // 2.4G 2T2R
 #define RFIC_3052                   9       // 2.4G/5G 2T2R
+#define RFIC_3320					11	   // 2.4G 1T1R
+#define RFIC_3053					13      // 2.4G/5G 3T3R
+
 
 /*
 	BBP sections
@@ -139,6 +174,8 @@
 #define BBP_R103		103
 #define BBP_R105		105
 #define BBP_R106		106
+#define BBP_R109		109
+#define BBP_R110		110
 #define BBP_R113		113
 #define BBP_R114		114
 #define BBP_R115		115
@@ -153,9 +190,149 @@
 #ifdef RT30xx
 #define BBP_R138		138 // add by johnli, RF power sequence setup, ADC dynamic on/off control
 #endif // RT30xx //
+#define BBP_R142		142
+#define BBP_R143		143
 
 
 #define BBPR94_DEFAULT	0x06 // Add 1 value will gain 1db
+
+
+//
+// BBP R49 TSSI (Transmit Signal Strength Indicator)
+//
+#ifdef RT_BIG_ENDIAN
+typedef union _BBP_R49_STRUC {
+	struct
+	{
+		UCHAR	adc5_in_sel:1; // 0: TSSI (from the external components, old version), 1: PSI (internal components, new version - RT3390)
+		UCHAR	bypassTSSIAverage:1; // 0: the average TSSI (the average of the 16 samples), 1: the current TSSI
+		UCHAR	Reserved:1; // Reserved field
+		UCHAR	TSSI:5; // TSSI value
+	} field;
+
+	UCHAR		byte;
+} BBP_R49_STRUC, *PBBP_R49_STRUC;
+#else
+typedef union _BBP_R49_STRUC {
+	struct
+	{
+		UCHAR	TSSI:5; // TSSI value
+		UCHAR	Reserved:1; // Reserved field
+		UCHAR	bypassTSSIAverage:1; // 0: the average TSSI (the average of the 16 samples), 1: the current TSSI
+		UCHAR	adc5_in_sel:1; // 0: TSSI (from the external components, old version), 1: PSI (internal components, new version - RT3390)
+	} field;
+	
+	UCHAR		byte;
+} BBP_R49_STRUC, *PBBP_R49_STRUC;
+#endif
+
+//
+// BBP R105 (FEQ control, MLD control and SIG remodulation)
+//
+#ifdef RT_BIG_ENDIAN
+typedef union _BBP_R105_STRUC {
+	struct
+	{
+		UCHAR	Reserve1:4; // Reserved field
+		UCHAR	EnableSIGRemodulation:1; // Enable the channel estimation updates based on remodulation of L-SIG and HT-SIG symbols.
+		UCHAR	MLDFor2Stream:1; // Apply Maximum Likelihood Detection (MLD) for 2 stream case (reserved field if single RX)
+		UCHAR	IndependentFeedForwardCompensation:1; // Apply independent feed-forward compensation for independent stream.
+		UCHAR	DetectSIGOnPrimaryChannelOnly:1; // Under 40 MHz band, detect SIG on primary channel only.
+	} field;
+
+	UCHAR		byte;
+} BBP_R105_STRUC, *PBBP_R105_STRUC;
+#else
+typedef union _BBP_R105_STRUC {
+	struct
+	{
+		UCHAR	DetectSIGOnPrimaryChannelOnly:1; // Under 40 MHz band, detect SIG on primary channel only.
+		UCHAR	IndependentFeedForwardCompensation:1; // Apply independent feed-forward compensation for independent stream.
+		UCHAR	MLDFor2Stream:1; // Apply Maximum Likelihood Detection (MLD) for 2 stream case (reserved field if single RX)
+		UCHAR	EnableSIGRemodulation:1; // Enable the channel estimation updates based on remodulation of L-SIG and HT-SIG symbols.
+		UCHAR	Reserve1:4; // Reserved field
+	} field;
+	
+	UCHAR		byte;
+} BBP_R105_STRUC, *PBBP_R105_STRUC;
+#endif
+
+//
+// BBP R106 (GI remover)
+//
+#ifdef RT_BIG_ENDIAN
+typedef union _BBP_R106_STRUC {
+	struct
+	{
+		UCHAR	EnableLowPowerFSD:1; // enable/disable the low power FSD
+		UCHAR	ShortGI_Offset40:4; // Delay GI remover when the short GI is detected in 40MHz band (40M sampling rate)
+		UCHAR	ShortGI_Offset20:3; // Delay GI remover when the short GI is detected in 20MHz band (20M sampling rate)
+	} field;
+
+	UCHAR		byte;
+} BBP_R106_STRUC, *PBBP_R106_STRUC;
+#else
+typedef union _BBP_R106_STRUC {
+	struct
+	{
+		UCHAR	ShortGI_Offset20:3; // Delay GI remover when the short GI is detected in 20MHz band (20M sampling rate)
+		UCHAR	ShortGI_Offset40:4; // Delay GI remover when the short GI is detected in 40MHz band (40M sampling rate)
+		UCHAR	EnableLowPowerFSD:1; // enable/disable the low power FSD
+	} field;
+	
+	UCHAR		byte;
+} BBP_R106_STRUC, *PBBP_R106_STRUC;
+#endif
+
+//
+// BBP R109 (Tx power control in 0.1dB step)
+//
+#ifdef RT_BIG_ENDIAN
+typedef union _BBP_R109_STRUC {
+	struct
+	{
+		UCHAR	Tx1PowerCtrl:4; // Tx1 power control in 0.1dB step (valid: 0~10)
+		UCHAR	Tx0PowerCtrl:4; // Tx0 power control in 0.1dB step (valid: 0~10)
+	} field;
+
+	UCHAR		byte;
+} BBP_R109_STRUC, *PBBP_R109_STRUC;
+#else
+typedef union _BBP_R109_STRUC {
+	struct
+	{
+		UCHAR	Tx0PowerCtrl:4; // Tx0 power control in 0.1dB step (valid: 0~10)
+		UCHAR	Tx1PowerCtrl:4; // Tx0 power control in 0.1dB step (valid: 0~10)
+	} field;
+	
+	UCHAR		byte;
+} BBP_R109_STRUC, *PBBP_R109_STRUC;
+#endif
+
+//
+// BBP R110 (Tx power control in 0.1dB step)
+//
+#ifdef RT_BIG_ENDIAN
+typedef union _BBP_R110_STRUC {
+	struct
+	{
+		UCHAR	Tx2PowerCtrl:4; // Tx2 power control in 0.1dB step (valid: 0~10)
+		UCHAR	AllTxPowerCtrl:4; // All transmitters' fine power control in 0.1dB (valid: 0~10)
+	} field;
+
+	UCHAR		byte;
+} BBP_R110_STRUC, *PBBP_R110_STRUC;
+#else
+typedef union _BBP_R110_STRUC {
+	struct
+	{
+		UCHAR	AllTxPowerCtrl:4; // All transmitters' fine power control in 0.1dB (valid: 0~10)
+		UCHAR	Tx2PowerCtrl:4; // Tx2 power control in 0.1dB step (valid: 0~10)
+	} field;
+	
+	UCHAR		byte;
+} BBP_R110_STRUC, *PBBP_R110_STRUC;
+#endif
 
 
 #ifdef MERGE_ARCH_TEAM
@@ -165,8 +342,9 @@
 #ifdef RT30xx
 	// edit by johnli, RF power sequence setup, add BBP R138 for ADC dynamic on/off control
 	#define MAX_BBP_ID	138
-#endif // RT30xx //
-#ifndef RT30xx
+#elif defined(RT2883)
+	#define MAX_BBP_ID	180
+#else
 	#define MAX_BBP_ID	136
 #endif // RT30xx //
 	#define MAX_BBP_MSG_SIZE	2048
@@ -221,42 +399,10 @@
 
 
 #ifdef RT30xx
-//Need to collect each ant's rssi concurrently
-//rssi1 is report to pair2 Ant and rss2 is reprot to pair1 Ant when 4 Ant
-#define COLLECT_RX_ANTENNA_AVERAGE_RSSI(_pAd, _rssi1, _rssi2)					\
-{																				\
-	SHORT	AvgRssi;															\
-	UCHAR	UsedAnt;															\
-	if (_pAd->RxAnt.EvaluatePeriod == 0)									\
-	{																		\
-		UsedAnt = _pAd->RxAnt.Pair1PrimaryRxAnt;							\
-		AvgRssi = _pAd->RxAnt.Pair1AvgRssi[UsedAnt];						\
-		if (AvgRssi < 0)													\
-			AvgRssi = AvgRssi - (AvgRssi >> 3) + _rssi1;					\
-		else																\
-			AvgRssi = _rssi1 << 3;											\
-		_pAd->RxAnt.Pair1AvgRssi[UsedAnt] = AvgRssi;						\
-	}																		\
-	else																	\
-	{																		\
-		UsedAnt = _pAd->RxAnt.Pair1SecondaryRxAnt;							\
-		AvgRssi = _pAd->RxAnt.Pair1AvgRssi[UsedAnt];						\
-		if ((AvgRssi < 0) && (_pAd->RxAnt.FirstPktArrivedWhenEvaluate))		\
-			AvgRssi = AvgRssi - (AvgRssi >> 3) + _rssi1;					\
-		else																\
-		{																	\
-			_pAd->RxAnt.FirstPktArrivedWhenEvaluate = TRUE;					\
-			AvgRssi = _rssi1 << 3;											\
-		}																	\
-		_pAd->RxAnt.Pair1AvgRssi[UsedAnt] = AvgRssi;						\
-		_pAd->RxAnt.RcvPktNumWhenEvaluate++;								\
-	}																		\
-}
-
 
 #define RTMP_ASIC_MMPS_DISABLE(_pAd)							\
 	do{															\
-		UCHAR _bbpData;											\
+		UCHAR _bbpData = 0;											\
 		UINT32 _macData;											\
 		/* disable MMPS BBP control register */						\
 		RTMP_BBP_IO_READ8_BY_REG_ID(_pAd, BBP_R3, &_bbpData);	\
@@ -272,7 +418,7 @@
 
 #define RTMP_ASIC_MMPS_ENABLE(_pAd)							\
 	do{															\
-		UCHAR _bbpData;											\
+		UCHAR _bbpData = 0;											\
 		UINT32 _macData;											\
 		/* enable MMPS BBP control register */						\
 		RTMP_BBP_IO_READ8_BY_REG_ID(_pAd, BBP_R3, &_bbpData);	\

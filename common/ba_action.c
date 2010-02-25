@@ -103,6 +103,20 @@ VOID BA_MaxWinSizeReasign(
 	else
 		MaxSize = 7;
 
+
+#ifdef CONFIG_STA_SUPPORT
+#ifdef RT3593
+	if (IS_RT3593(pAd) &&
+		(pAd->StaActive.SupportedPhyInfo.MCSSet[2] != 0x00) &&
+		INFRA_ON(pAd))
+	{
+		/* the receive capability can accept MCS16 ~ MCS23 */
+		MaxSize = 31; //RT2883 will use 31
+	}
+#endif // RT3593 //
+#endif // CONFIG_STA_SUPPORT //
+
+
 	DBGPRINT(RT_DEBUG_TRACE, ("ba> Win Size = %d, Max Size = %d\n", 
 			*pWinSize, MaxSize));
 
@@ -124,7 +138,7 @@ void Announce_Reordering_Packet(IN PRTMP_ADAPTER			pAd,
 
 	if (mpdu->bAMSDU)
 	{
-		ASSERT(0);
+		//ASSERT(0);
 		BA_Reorder_AMSDU_Annnounce(pAd, pPacket);
 	}
 	else
@@ -492,7 +506,9 @@ VOID BAOriSessionSetUp(
 	BA_ORI_ENTRY            *pBAEntry = NULL;
 	USHORT                  Idx;
 	BOOLEAN                 Cancelled;
-	
+
+	ASSERT(TID < NUM_OF_TID);
+    
 	if ((pAd->CommonCfg.BACapability.field.AutoBA != TRUE)  &&  (isForced == FALSE))
 		return;
 
@@ -649,11 +665,13 @@ BOOLEAN BARecSessionAdd(
 		BAWinSize = 64;
 	}
 
+	// get software BA rec array index, Idx
 	Idx = pEntry->BARecWcidArray[TID];
 
 
 	if (Idx == 0)
 	{
+		// allocate new array entry for the new session
 		pBAEntry = BATableAllocRecEntry(pAd, &Idx);     
 	}
 	else
@@ -724,10 +742,10 @@ BA_REC_ENTRY *BATableAllocRecEntry(
 
 	NdisAcquireSpinLock(&pAd->BATabLock);
 
-	if (pAd->BATable.numAsRecipient >= MAX_BARECI_SESSION)
+	if (pAd->BATable.numAsRecipient >= (MAX_LEN_OF_BA_REC_TABLE - 1))
 	{
 		DBGPRINT(RT_DEBUG_OFF, ("BA Recipeint Session (%ld) > %d\n", 
-							pAd->BATable.numAsRecipient, MAX_BARECI_SESSION));
+							pAd->BATable.numAsRecipient, (MAX_LEN_OF_BA_REC_TABLE - 1)));
 		goto done;
 	}
 
@@ -759,7 +777,7 @@ BA_ORI_ENTRY *BATableAllocOriEntry(
 
 	NdisAcquireSpinLock(&pAd->BATabLock);
 
-	if (pAd->BATable.numAsOriginator >= (MAX_LEN_OF_BA_ORI_TABLE))
+	if (pAd->BATable.numAsOriginator >= (MAX_LEN_OF_BA_ORI_TABLE - 1))
 	{
 		goto done;
 	}
@@ -1097,7 +1115,21 @@ VOID BAOriSessionSetupTimeout(
 	if ((pBAEntry->ORI_BA_Status == Originator_WaitRes) && (pBAEntry->Token < ORI_SESSION_MAX_RETRY))
 	{
 		MLME_ADDBA_REQ_STRUCT    AddbaReq;  
-	
+
+#ifdef CONFIG_STA_SUPPORT
+		IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
+		{
+			if (INFRA_ON(pAd) && 
+				RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_BSS_SCAN_IN_PROGRESS) &&
+				(OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_MEDIA_STATE_CONNECTED)))
+			{
+				/* In scan progress and have no chance to send out, just re-schedule to another time period */
+				RTMPSetTimer(&pBAEntry->ORIBATimer, ORI_BA_SESSION_TIMEOUT);
+				return;
+			}
+		}
+#endif // CONFIG_STA_SUPPORT //
+
 		NdisZeroMemory(&AddbaReq, sizeof(AddbaReq));
 		COPY_MAC_ADDR(AddbaReq.pAddr, pEntry->Addr);
 		AddbaReq.Wcid = (UCHAR)(pEntry->Aid);
@@ -1105,7 +1137,7 @@ VOID BAOriSessionSetupTimeout(
 		AddbaReq.BaBufSize = pAd->CommonCfg.BACapability.field.RxBAWinLimit;
 		AddbaReq.TimeOutValue = 0;
 		AddbaReq.Token = pBAEntry->Token;       
-		MlmeEnqueue(pAd, ACTION_STATE_MACHINE, MT2_MLME_ADD_BA_CATE, sizeof(MLME_ADDBA_REQ_STRUCT), (PVOID)&AddbaReq);
+		MlmeEnqueue(pAd, ACTION_STATE_MACHINE, MT2_MLME_ADD_BA_CATE, sizeof(MLME_ADDBA_REQ_STRUCT), (PVOID)&AddbaReq, 0);
 		RTMP_MLME_HANDLER(pAd);
 		DBGPRINT(RT_DEBUG_TRACE,("BA Ori Session Timeout(%d) : Send ADD BA again\n", pBAEntry->Token));
 
@@ -1210,7 +1242,7 @@ VOID PeerAddBAReqAction(
 		}
 	}
 
-	if (pAd->MacTab.Content[Elem->Wcid].ValidAsCLI)
+	if (IS_ENTRY_CLIENT(&pAd->MacTab.Content[Elem->Wcid]))
 		ASSERT(pAd->MacTab.Content[Elem->Wcid].Sst == SST_ASSOC);
 
 	pAddreqFrame = (PFRAME_ADDBA_REQ)(&Elem->Msg[0]);
@@ -1227,15 +1259,14 @@ VOID PeerAddBAReqAction(
 #ifdef CONFIG_STA_SUPPORT
 	IF_DEV_CONFIG_OPMODE_ON_STA(pAd)
 	{
-		if (ADHOC_ON(pAd))
-			ActHeaderInit(pAd, &ADDframe.Hdr, pAddr, pAd->CurrentAddress, pAd->CommonCfg.Bssid);
-		else
+		if (ADHOC_ON(pAd)
 #ifdef QOS_DLS_SUPPORT
-		if (pAd->MacTab.Content[Elem->Wcid].ValidAsDls)
+			|| (IS_ENTRY_DLS(&pAd->MacTab.Content[Elem->Wcid]))
+#endif // QOS_DLS_SUPPORT //
+			)
 			ActHeaderInit(pAd, &ADDframe.Hdr, pAddr, pAd->CurrentAddress, pAd->CommonCfg.Bssid);
 		else
-#endif // QOS_DLS_SUPPORT //
-		ActHeaderInit(pAd, &ADDframe.Hdr, pAd->CommonCfg.Bssid, pAd->CurrentAddress, pAddr);
+			ActHeaderInit(pAd, &ADDframe.Hdr, pAd->CommonCfg.Bssid, pAd->CurrentAddress, pAddr);
 	}
 #endif // CONFIG_STA_SUPPORT //
 	ADDframe.Category = CATEGORY_BA;
@@ -1438,7 +1469,8 @@ VOID SendPSMPAction(
 	{
 		case MMPS_ENABLE:
 #ifdef RT30xx
-			if (IS_RT30xx(pAd) 
+			// 1x1 chip does not support MIMO Power Save mode
+			if ((IS_RT3071(pAd) || IS_RT3572(pAd) || IS_RT3593(pAd))
 				&&(pAd->Antenna.field.RxPath>1||pAd->Antenna.field.TxPath>1))
 			{
 				RTMP_ASIC_MMPS_DISABLE(pAd);
@@ -1447,11 +1479,18 @@ VOID SendPSMPAction(
 			Frame.Psmp = 0;
 			break;
 		case MMPS_DYNAMIC:
+#ifdef RT30xx
+			if ((IS_RT3071(pAd) || IS_RT3572(pAd) || IS_RT3593(pAd))
+				&&(pAd->Antenna.field.RxPath>1||pAd->Antenna.field.TxPath>1))
+			{
+				RTMP_ASIC_MMPS_ENABLE(pAd);
+			}
+#endif // RT30xx //
 			Frame.Psmp = 3;
 			break;
 		case MMPS_STATIC:
 #ifdef RT30xx
-			if (IS_RT30xx(pAd) 
+			if ((IS_RT3071(pAd) || IS_RT3572(pAd) || IS_RT3593(pAd))
 				&&(pAd->Antenna.field.RxPath>1||pAd->Antenna.field.TxPath>1))
 			{
 				RTMP_ASIC_MMPS_ENABLE(pAd);
@@ -1471,7 +1510,7 @@ VOID SendPSMPAction(
 
 #define RADIO_MEASUREMENT_REQUEST_ACTION	0
 
-typedef struct PACKED
+typedef struct GNU_PACKED
 {
 	UCHAR	RegulatoryClass;
 	UCHAR	ChannelNumber;
@@ -1484,7 +1523,7 @@ typedef struct PACKED
 	UCHAR   SSIDIE[2];			// 2 byte
 } BEACON_REQUEST;
 
-typedef struct PACKED
+typedef struct GNU_PACKED
 {
 	UCHAR	ID;
 	UCHAR	Length;
@@ -1653,6 +1692,16 @@ VOID Indicate_AMPDU_Packet(
 
 	if (!RX_BLK_TEST_FLAG(pRxBlk, fRX_AMSDU) &&  (pRxBlk->DataSize > MAX_RX_PKT_LEN))
 	{
+		static int err_size;
+
+		err_size++;
+		if (err_size > 20) {
+			 DBGPRINT(RT_DEBUG_TRACE, ("AMPDU DataSize = %d\n", pRxBlk->DataSize));
+			 hex_dump("802.11 Header", (UCHAR *)pRxBlk->pHeader, 24);
+			 hex_dump("Payload", pRxBlk->pData, 64);
+			 err_size = 0;
+		}
+
 		// release packet
 		RELEASE_NDIS_PACKET(pAd, pRxBlk->pRxPacket, NDIS_STATUS_FAILURE);
 		return;

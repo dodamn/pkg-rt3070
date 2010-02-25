@@ -46,32 +46,63 @@ extern  UCHAR Phy11BGNextRateUpward[]; // defined in mlme.c
 extern UCHAR	EpToQueue[];
 
 
-VOID REPORT_AMSDU_FRAMES_TO_LLC(
-	IN	PRTMP_ADAPTER	pAd,
-	IN	PUCHAR			pData,
-	IN	ULONG			DataSize)
-{	
-	PNDIS_PACKET	pPacket;
-	UINT			nMSDU;
-	struct			sk_buff *pSkb;
+NDIS_STATUS RTUSBFreeDescriptorRelease(
+	IN RTMP_ADAPTER *pAd, 
+	IN UCHAR		BulkOutPipeId)
+{
+	unsigned long   IrqFlags;
+	HT_TX_CONTEXT	*pHTTXContext;
+	
+	pHTTXContext = &pAd->TxContext[BulkOutPipeId];
+	RTMP_IRQ_LOCK(&pAd->TxContextQueueLock[BulkOutPipeId], IrqFlags);
+	pHTTXContext->bCurWriting = FALSE;
+	RTMP_IRQ_UNLOCK(&pAd->TxContextQueueLock[BulkOutPipeId], IrqFlags);
 
-	nMSDU = 0;
-	/* allocate a rx packet */
-	pSkb = dev_alloc_skb(RX_BUFFER_AGGRESIZE);
-	pPacket = (PNDIS_PACKET)OSPKT_TO_RTPKT(pSkb);
-	if (pSkb)
-	{
-
-		/* convert 802.11 to 802.3 packet */
-		pSkb->dev = get_netdev_from_bssid(pAd, BSS0);		
-		RTMP_SET_PACKET_SOURCE(pPacket, PKTSRC_NDIS);
-		deaggregate_AMSDU_announce(pAd, pPacket, pData, DataSize);
-	}
-	else
-	{
-		DBGPRINT(RT_DEBUG_ERROR,("Can't allocate skb\n"));
-	}
+	return (NDIS_STATUS_SUCCESS);
 }
+
+
+#ifdef RALINK_ATE
+/*
+	========================================================================
+	
+	Routine Description:
+
+	Arguments:
+
+	Return Value:
+
+	IRQL = 
+	
+	Note:
+	
+	========================================================================
+*/
+VOID	RTUSBRejectPendingPackets(
+	IN	PRTMP_ADAPTER	pAd)
+{
+	UCHAR			Index;
+	PQUEUE_ENTRY	pEntry;
+	PNDIS_PACKET	pPacket;
+	PQUEUE_HEADER	pQueue;
+	
+
+	for (Index = 0; Index < 4; Index++)
+	{
+		NdisAcquireSpinLock(&pAd->TxSwQueueLock[Index]);
+		while (pAd->TxSwQueue[Index].Head != NULL)
+		{
+			pQueue = (PQUEUE_HEADER) &(pAd->TxSwQueue[Index]);
+			pEntry = RemoveHeadQueue(pQueue);
+			pPacket = QUEUE_ENTRY_TO_PACKET(pEntry);
+			RELEASE_NDIS_PACKET(pAd, pPacket, NDIS_STATUS_FAILURE);
+		}
+		NdisReleaseSpinLock(&pAd->TxSwQueueLock[Index]);
+
+	}
+
+}
+#endif // RALINK_ATE //
 
 
 /*
@@ -132,22 +163,6 @@ NDIS_STATUS	RTUSBFreeDescriptorRequest(
 }
 
 
-NDIS_STATUS RTUSBFreeDescriptorRelease(
-	IN RTMP_ADAPTER *pAd, 
-	IN UCHAR		BulkOutPipeId)
-{
-	unsigned long   IrqFlags;
-	HT_TX_CONTEXT	*pHTTXContext;
-	
-	pHTTXContext = &pAd->TxContext[BulkOutPipeId];
-	RTMP_IRQ_LOCK(&pAd->TxContextQueueLock[BulkOutPipeId], IrqFlags);
-	pHTTXContext->bCurWriting = FALSE;
-	RTMP_IRQ_UNLOCK(&pAd->TxContextQueueLock[BulkOutPipeId], IrqFlags);
-
-	return (NDIS_STATUS_SUCCESS);
-}
-
-
 BOOLEAN	RTUSBNeedQueueBackForAgg(
 	IN RTMP_ADAPTER *pAd, 
 	IN UCHAR		BulkOutPipeId)
@@ -175,47 +190,6 @@ BOOLEAN	RTUSBNeedQueueBackForAgg(
 	RTMP_IRQ_UNLOCK(&pAd->TxContextQueueLock[BulkOutPipeId], IrqFlags);
 
 	return needQueBack;
-
-}
-
-
-/*
-	========================================================================
-	
-	Routine Description:
-
-	Arguments:
-
-	Return Value:
-
-	IRQL = 
-	
-	Note:
-	
-	========================================================================
-*/
-VOID	RTUSBRejectPendingPackets(
-	IN	PRTMP_ADAPTER	pAd)
-{
-	UCHAR			Index;
-	PQUEUE_ENTRY	pEntry;
-	PNDIS_PACKET	pPacket;
-	PQUEUE_HEADER	pQueue;
-	
-
-	for (Index = 0; Index < 4; Index++)
-	{
-		NdisAcquireSpinLock(&pAd->TxSwQueueLock[Index]);
-		while (pAd->TxSwQueue[Index].Head != NULL)
-		{
-			pQueue = (PQUEUE_HEADER) &(pAd->TxSwQueue[Index]);
-			pEntry = RemoveHeadQueue(pQueue);
-			pPacket = QUEUE_ENTRY_TO_PACKET(pEntry);
-			RELEASE_NDIS_PACKET(pAd, pPacket, NDIS_STATUS_FAILURE);
-		}
-		NdisReleaseSpinLock(&pAd->TxSwQueueLock[Index]);
-
-	}
 
 }
 

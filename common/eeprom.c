@@ -67,6 +67,7 @@ INT RtmpChipOpsEepromHook(
 		pChipOps->eeinit = eFuse_init;
 		pChipOps->eeread = rtmp_ee_efuse_read16;
 		pChipOps->eewrite = rtmp_ee_efuse_write16;
+		DBGPRINT(RT_DEBUG_TRACE, ("NVM is EFUSE\n"));
 		return 0 ;	
 	}
 	else

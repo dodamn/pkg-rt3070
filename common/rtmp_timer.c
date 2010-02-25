@@ -45,7 +45,7 @@ BUILD_TIMER_FUNCTION(MlmePeriodicExec);
 //BUILD_TIMER_FUNCTION(MlmeRssiReportExec);
 BUILD_TIMER_FUNCTION(AsicRxAntEvalTimeout);
 BUILD_TIMER_FUNCTION(APSDPeriodicExec);
-BUILD_TIMER_FUNCTION(AsicRfTuningExec);
+BUILD_TIMER_FUNCTION(EnqueueStartForPSKExec);
 #ifdef RTMP_MAC_USB
 BUILD_TIMER_FUNCTION(BeaconUpdateExec);
 #endif // RTMP_MAC_USB //
@@ -61,14 +61,21 @@ BUILD_TIMER_FUNCTION(DisassocTimeout);
 BUILD_TIMER_FUNCTION(LinkDownExec);
 BUILD_TIMER_FUNCTION(StaQuickResponeForRateUpExec);
 BUILD_TIMER_FUNCTION(WpaDisassocApAndBlockAssoc);
+#ifdef PCIE_PS_SUPPORT
+BUILD_TIMER_FUNCTION(PsPollWakeExec);
+BUILD_TIMER_FUNCTION(RadioOnExec);
+#endif // PCIE_PS_SUPPORT //
 #ifdef QOS_DLS_SUPPORT
 BUILD_TIMER_FUNCTION(DlsTimeoutAction);
 #endif // QOS_DLS_SUPPORT //
 
 
+
 #ifdef RTMP_MAC_USB
 BUILD_TIMER_FUNCTION(RtmpUsbStaAsicForceWakeupTimeout);
 #endif // RTMP_MAC_USB //
+
+
 #endif // CONFIG_STA_SUPPORT //
 
 
@@ -82,6 +89,10 @@ extern void LedCtrlMain(
 BUILD_TIMER_FUNCTION(LedCtrlMain);
 #endif
 
+
+#ifdef RT2883_TEMP_PATCH
+BUILD_TIMER_FUNCTION(eTxBfProbeTimerExec);
+#endif // RT2883_TEMP_PATCH //
 
 #ifdef RTMP_TIMER_TASK_SUPPORT
 static void RtmpTimerQHandle(RTMP_ADAPTER *pAd)
@@ -151,7 +162,7 @@ static void RtmpTimerQHandle(RTMP_ADAPTER *pAd)
 
 
 INT RtmpTimerQThread(
-	IN OUT PVOID Context)
+	IN ULONG Context)
 {
 	RTMP_OS_TASK	*pTask;
 	PRTMP_ADAPTER	pAd;
@@ -327,3 +338,4 @@ void RtmpTimerQInit(RTMP_ADAPTER *pAd)
 	}
 }
 #endif // RTMP_TIMER_TASK_SUPPORT //
+

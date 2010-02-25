@@ -78,7 +78,6 @@ int Set_CarrierReCheck_Proc(IN PRTMP_ADAPTER pAd, IN PSTRING arg);
 INT Set_CarrierStopCheck_Proc(IN PRTMP_ADAPTER pAd, IN PSTRING arg);
 void NewCarrierDetectionStart(PRTMP_ADAPTER pAd);
 void RTMPHandleRadarInterrupt(PRTMP_ADAPTER  pAd);
-VOID CSAsicDisableSync(IN PRTMP_ADAPTER pAd);
 #endif // TONE_RADAR_DETECT_SUPPORT //
 
 
@@ -106,9 +105,6 @@ BOOLEAN RadarChannelCheck(
 
 ULONG JapRadarType(
 	IN PRTMP_ADAPTER pAd);
-
-ULONG RTMPBbpReadRadarDuration(
-	IN PRTMP_ADAPTER	pAd);
 
 ULONG RTMPReadRadarDuration(
 	IN PRTMP_ADAPTER	pAd);

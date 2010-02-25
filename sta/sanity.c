@@ -42,7 +42,6 @@ extern UCHAR	WPA_OUI[];
 extern UCHAR	RSN_OUI[];
 extern UCHAR	WME_INFO_ELEM[];
 extern UCHAR	WME_PARM_ELEM[];
-extern UCHAR	Ccx2QosInfo[];
 extern UCHAR	RALINK_OUI[];
 extern UCHAR	BROADCOM_OUI[];
 
@@ -106,6 +105,7 @@ BOOLEAN PeerAssocRspSanity(
     OUT UCHAR			*pAddHtInfoLen,
     OUT UCHAR			*pNewExtChannelOffset,
     OUT PEDCA_PARM pEdcaParm,
+    OUT EXT_CAP_INFO_ELEMENT *pExtCapInfo,
     OUT UCHAR *pCkipFlag) 
 {
     CHAR          IeType, *Ptr;
@@ -245,6 +245,14 @@ BOOLEAN PeerAssocRspSanity(
                     }
                 }
                 break;
+			case IE_EXT_CAPABILITY:
+				if (pEid->Len >= sizeof(EXT_CAP_INFO_ELEMENT))
+				{
+					NdisMoveMemory(pExtCapInfo, &pEid->Octet[0], 4);
+					DBGPRINT(RT_DEBUG_WARN, ("PeerAssocReqSanity - IE_EXT_CAPABILITY!\n"));
+				}
+				break;
+
             default:
                 DBGPRINT(RT_DEBUG_TRACE, ("PeerAssocRspSanity - ignore unrecognized EID = %d\n", pEid->Eid));
                 break;
@@ -257,61 +265,6 @@ BOOLEAN PeerAssocRspSanity(
 
     return TRUE;
 }
-
-/* 
-    ==========================================================================
-    Description:
-        MLME message sanity check
-    Return:
-        TRUE if all parameters are OK, FALSE otherwise
-        
-	IRQL = DISPATCH_LEVEL
-
-    ==========================================================================
- */
-BOOLEAN PeerProbeReqSanity(
-    IN PRTMP_ADAPTER pAd, 
-    IN VOID *Msg, 
-    IN ULONG MsgLen, 
-    OUT PUCHAR pAddr2,
-    OUT CHAR Ssid[], 
-    OUT UCHAR *pSsidLen) 
-{
-    UCHAR         Idx;
-    UCHAR	      RateLen;
-    CHAR          IeType;
-    PFRAME_802_11 pFrame = (PFRAME_802_11)Msg;
-
-    COPY_MAC_ADDR(pAddr2, pFrame->Hdr.Addr2);
-
-    if ((pFrame->Octet[0] != IE_SSID) || (pFrame->Octet[1] > MAX_LEN_OF_SSID)) 
-    {
-        DBGPRINT(RT_DEBUG_TRACE, ("PeerProbeReqSanity fail - wrong SSID IE(Type=%d,Len=%d)\n",pFrame->Octet[0],pFrame->Octet[1]));
-        return FALSE;
-    } 
-    
-    *pSsidLen = pFrame->Octet[1];
-    NdisMoveMemory(Ssid, &pFrame->Octet[2], *pSsidLen);
-
-    Idx = *pSsidLen + 2;
-
-    // -- get supported rates from payload and advance the pointer
-    IeType = pFrame->Octet[Idx];
-    RateLen = pFrame->Octet[Idx + 1];
-    if (IeType != IE_SUPP_RATES) 
-    {
-        DBGPRINT(RT_DEBUG_TRACE, ("PeerProbeReqSanity fail - wrong SupportRates IE(Type=%d,Len=%d)\n",pFrame->Octet[Idx],pFrame->Octet[Idx+1]));
-        return FALSE;
-    }
-    else
-    {
-        if ((pAd->CommonCfg.PhyMode == PHY_11G) && (RateLen < 8))
-            return (FALSE);
-    }
-
-    return TRUE;
-}
-
 /* 
     ==========================================================================
     Description:

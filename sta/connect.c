@@ -5,7 +5,7 @@
  * Hsinchu County 302,
  * Taiwan, R.O.C.
  *
- * (c) Copyright 2002-2007, Ralink Technology, Inc.
+ * (c) Copyright 2002-2004, Ralink Technology, Inc.
  *
  * This program is free software; you can redistribute it and/or modify  * 
  * it under the terms of the GNU General Public License as published by  * 
@@ -165,17 +165,24 @@ VOID MlmeCntlMachinePerformAction(
 				
 				pAd->Mlme.CntlMachine.CurrState = CNTL_IDLE;
 
+				// scan completed, init to not FastScan
+				pAd->StaCfg.bImprovedScan = FALSE;
+
                 //
 				// Set LED status to previous status.
 				//
 				if (pAd->bLedOnScanning)
 				{
 					pAd->bLedOnScanning = FALSE;
+#ifdef LED_CONTROL_SUPPORT					
 					RTMPSetLED(pAd, pAd->LedStatus);
+#endif // LED_CONTROL_SUPPORT //
 				}
 #ifdef DOT11N_DRAFT3
 				// AP sent a 2040Coexistence mgmt frame, then station perform a scan, and then send back the respone.
-				if (pAd->CommonCfg.BSSCoexist2040.field.InfoReq == 1)
+				if ((pAd->CommonCfg.BSSCoexist2040.field.InfoReq == 1) && 
+					INFRA_ON(pAd) && 
+					OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_SCAN_2040))
 				{
 					Update2040CoexistFrameAndNotify(pAd, BSSID_WCID, TRUE);
 				}
@@ -206,7 +213,7 @@ VOID MlmeCntlMachinePerformAction(
 				if (pAd->StaCfg.CCXReqType != MSRN_TYPE_UNUSED)
 				{
 					// Cisco scan request is finished, prepare beacon report
-					MlmeEnqueue(pAd, AIRONET_STATE_MACHINE, MT2_AIRONET_SCAN_DONE, 0, NULL);
+					MlmeEnqueue(pAd, AIRONET_STATE_MACHINE, MT2_AIRONET_SCAN_DONE, 0, NULL, 0);
 				}
 #endif // CCX_SUPPORT //
 				pAd->Mlme.CntlMachine.CurrState = CNTL_IDLE;
@@ -264,10 +271,10 @@ VOID CntlIdleProc(
 
 		case OID_802_11_DISASSOCIATE:
 			DisassocParmFill(pAd, &DisassocReq, pAd->CommonCfg.Bssid, REASON_DISASSOC_STA_LEAVING);
-			MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_DISASSOC_REQ, sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq);
+			MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_DISASSOC_REQ, sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq, 0);
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_OID_DISASSOC;
 #ifdef WPA_SUPPLICANT_SUPPORT
-            if (pAd->StaCfg.WpaSupplicantUP != WPA_SUPPLICANT_ENABLE_WITH_WEB_UI)
+            if ((pAd->StaCfg.WpaSupplicantUP & 0x7F) != WPA_SUPPLICANT_ENABLE_WITH_WEB_UI)
 #endif // WPA_SUPPLICANT_SUPPORT //
             {
     			// Set the AutoReconnectSsid to prevent it reconnect to old SSID
@@ -290,6 +297,7 @@ VOID CntlIdleProc(
 			CntlOidDLSSetupProc(pAd, Elem);
 			break;
 #endif // QOS_DLS_SUPPORT //
+
 
 		default:
 			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - Illegal message in CntlIdleProc(MsgType=%ld)\n",Elem->MsgType));
@@ -338,7 +346,7 @@ VOID CntlOidScanProc(
 
 	ScanParmFill(pAd, &ScanReq, (PSTRING) Elem->Msg, Elem->MsgLen, BSS_ANY, SCAN_ACTIVE);
 	MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_SCAN_REQ, 
-		sizeof(MLME_SCAN_REQ_STRUCT), &ScanReq);
+		sizeof(MLME_SCAN_REQ_STRUCT), &ScanReq, 0);
 	pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_OID_LIST_SCAN;
 }
 
@@ -364,7 +372,8 @@ VOID CntlOidSsidProc(
 	NdisZeroMemory(pAd->MlmeAux.Ssid, MAX_LEN_OF_SSID);
 	NdisMoveMemory(pAd->MlmeAux.Ssid, pOidSsid->Ssid, pOidSsid->SsidLength);
 	pAd->MlmeAux.SsidLen = (UCHAR)pOidSsid->SsidLength;
-	NdisZeroMemory(pAd->MlmeAux.Bssid, MAC_ADDR_LEN);
+	if (pAd->StaCfg.BssType == BSS_INFRA)
+		NdisZeroMemory(pAd->MlmeAux.Bssid, MAC_ADDR_LEN);
 	pAd->MlmeAux.BssType = pAd->StaCfg.BssType;
 
 	pAd->StaCfg.bAutoConnectByBssid = FALSE;
@@ -380,11 +389,17 @@ VOID CntlOidSsidProc(
 	//    & log them into MlmeAux.SsidBssTab for later-on iteration. Sort by RSSI order
 	BssTableSsidSort(pAd, &pAd->MlmeAux.SsidBssTab, (PCHAR)pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen);
 
-	DBGPRINT(RT_DEBUG_TRACE, ("CntlOidSsidProc():CNTL - %d BSS of %d BSS match the desire (%d)SSID - %s\n",
-			pAd->MlmeAux.SsidBssTab.BssNr, pAd->ScanTab.BssNr, pAd->MlmeAux.SsidLen, pAd->MlmeAux.Ssid));
+	DBGPRINT(RT_DEBUG_TRACE, ("CntlOidSsidProc():CNTL - %d BSS of %d BSS match the desire ",
+			pAd->MlmeAux.SsidBssTab.BssNr, pAd->ScanTab.BssNr));
+	if (pAd->MlmeAux.SsidLen == MAX_LEN_OF_SSID)
+		hex_dump("\nSSID", pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen);
+	else
+		DBGPRINT(RT_DEBUG_TRACE, ("(%d)SSID - %s\n", pAd->MlmeAux.SsidLen, pAd->MlmeAux.Ssid));
+
 	NdisGetSystemUpTime(&Now);
 
-	if (OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_MEDIA_STATE_CONNECTED) && 
+	if (INFRA_ON(pAd) &&
+		OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_MEDIA_STATE_CONNECTED) && 
 		(pAd->CommonCfg.SsidLen == pAd->MlmeAux.SsidBssTab.BssEntry[0].SsidLen) &&
 		NdisEqualMemory(pAd->CommonCfg.Ssid, pAd->MlmeAux.SsidBssTab.BssEntry[0].Ssid, pAd->CommonCfg.SsidLen) &&
 		MAC_ADDR_EQUAL(pAd->CommonCfg.Bssid, pAd->MlmeAux.SsidBssTab.BssEntry[0].Bssid))
@@ -405,7 +420,7 @@ VOID CntlOidSsidProc(
 			DBGPRINT(RT_DEBUG_TRACE, ("CntlOidSsidProc():CNTL - disassociate with current AP...\n"));
 			DisassocParmFill(pAd, &DisassocReq, pAd->CommonCfg.Bssid, REASON_DISASSOC_STA_LEAVING);
 			MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_DISASSOC_REQ, 
-						sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq);
+						sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq, 0);
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_DISASSOC;
 		}
 		else if (pAd->bConfigChanged == TRUE)
@@ -414,7 +429,7 @@ VOID CntlOidSsidProc(
 			DBGPRINT(RT_DEBUG_TRACE, ("CntlOidSsidProc():CNTL - disassociate with current AP Because config changed...\n"));
 			DisassocParmFill(pAd, &DisassocReq, pAd->CommonCfg.Bssid, REASON_DISASSOC_STA_LEAVING);
 			MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_DISASSOC_REQ, 
-						sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq);
+						sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq, 0);
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_DISASSOC;
 		}
 		else
@@ -466,7 +481,7 @@ VOID CntlOidSsidProc(
 		DBGPRINT(RT_DEBUG_TRACE, ("CntlOidSsidProc():CNTL - disassociate with current AP...\n"));
 		DisassocParmFill(pAd, &DisassocReq, pAd->CommonCfg.Bssid, REASON_DISASSOC_STA_LEAVING);
 		MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_DISASSOC_REQ, 
-					sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq);
+					sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq, 0);
 		pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_DISASSOC;
 	}
 	else
@@ -484,15 +499,16 @@ VOID CntlOidSsidProc(
 
 		if ((pAd->MlmeAux.SsidBssTab.BssNr == 0) && 
 			(pAd->StaCfg.bAutoReconnect == TRUE) && 
-			(pAd->MlmeAux.BssType == BSS_INFRA) &&
+			((pAd->MlmeAux.BssType == BSS_INFRA) || ((pAd->MlmeAux.BssType == BSS_ADHOC) && !pAd->StaCfg.bNotFirstScan)) &&
 			(MlmeValidateSSID(pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen) == TRUE)
 			)
 		{
 			MLME_SCAN_REQ_STRUCT       ScanReq;
-
+			pAd->StaCfg.bNotFirstScan = TRUE;
 			DBGPRINT(RT_DEBUG_TRACE, ("CntlOidSsidProc():CNTL - No matching BSS, start a new scan\n"));
+			BssTableInit(&pAd->ScanTab);
 			ScanParmFill(pAd, &ScanReq, (PSTRING) pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen, BSS_ANY, SCAN_ACTIVE);
-			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_SCAN_REQ, sizeof(MLME_SCAN_REQ_STRUCT), &ScanReq);
+			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_SCAN_REQ, sizeof(MLME_SCAN_REQ_STRUCT), &ScanReq, 0);
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_OID_LIST_SCAN;
 			// Reset Missed scan number
 			pAd->StaCfg.LastScanTime = Now;
@@ -523,6 +539,7 @@ VOID CntlOidRTBssidProc(
 	PUCHAR      pOidBssid = (PUCHAR)Elem->Msg;
 	MLME_DISASSOC_REQ_STRUCT    DisassocReq;
 	MLME_JOIN_REQ_STRUCT        JoinReq;
+	PBSS_ENTRY	pInBss = NULL;
 
 #ifdef RALINK_ATE
 /* No need to perform this routine when ATE is running. */
@@ -536,38 +553,77 @@ VOID CntlOidRTBssidProc(
 
 	// find the desired BSS in the latest SCAN result table
 	BssIdx = BssTableSearch(&pAd->ScanTab, pOidBssid, pAd->MlmeAux.Channel);	
+
+	{
+		pInBss = &pAd->ScanTab.BssEntry[BssIdx];
+
+		if (SSID_EQUAL(pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen, pInBss->Ssid, pInBss->SsidLen) == FALSE)
+			BssIdx = BSS_NOT_FOUND;
+		
+		if (pAd->StaCfg.AuthMode <= Ndis802_11AuthModeAutoSwitch)
+		{
+			if (pAd->StaCfg.WepStatus != pInBss->WepStatus)
+				BssIdx = BSS_NOT_FOUND;
+		}
+		else
+		{
+		// Check AuthMode and AuthModeAux for matching, in case AP support dual-mode
+		if ((pAd->StaCfg.AuthMode != pInBss->AuthMode) && 
+			(pAd->StaCfg.AuthMode != pInBss->AuthModeAux))
+			BssIdx = BSS_NOT_FOUND;
+		}
+	}
+				
 	if (BssIdx == BSS_NOT_FOUND) 
 	{
-		MLME_SCAN_REQ_STRUCT       ScanReq;
-		
-		DBGPRINT(RT_DEBUG_TRACE, ("CNTL - BSSID not found. reply NDIS_STATUS_NOT_ACCEPTED\n"));
-		//pAd->Mlme.CntlMachine.CurrState = CNTL_IDLE;
-		
-		DBGPRINT(RT_DEBUG_TRACE, ("CNTL - BSSID not found. start a new scan\n"));
-		ScanParmFill(pAd, &ScanReq, (PSTRING) pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen, BSS_ANY, SCAN_ACTIVE);
-		MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_SCAN_REQ, sizeof(MLME_SCAN_REQ_STRUCT), &ScanReq);
-		pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_OID_LIST_SCAN;
-		// Reset Missed scan number
-		NdisGetSystemUpTime(&pAd->StaCfg.LastScanTime);
+		if ((pAd->StaCfg.BssType == BSS_INFRA) ||
+			(pAd->StaCfg.bNotFirstScan == FALSE))
+		{
+			MLME_SCAN_REQ_STRUCT       ScanReq;
+			
+			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - BSSID not found. reply NDIS_STATUS_NOT_ACCEPTED\n"));
+			if (pAd->StaCfg.BssType == BSS_ADHOC)
+			pAd->StaCfg.bNotFirstScan = TRUE;
+			
+			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - BSSID not found. start a new scan\n"));
+			ScanParmFill(pAd, &ScanReq, (PSTRING) pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen, BSS_ANY, SCAN_ACTIVE);
+			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_SCAN_REQ, sizeof(MLME_SCAN_REQ_STRUCT), &ScanReq, 0);
+			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_OID_LIST_SCAN;
+			// Reset Missed scan number
+			NdisGetSystemUpTime(&pAd->StaCfg.LastScanTime);
+		}
+		else
+		{
+			MLME_START_REQ_STRUCT   StartReq;
+			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - BSSID not found. start a new ADHOC (Ssid=%s)...\n",pAd->MlmeAux.Ssid));
+			StartParmFill(pAd, &StartReq, (PCHAR)pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen);
+			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_START_REQ, sizeof(MLME_START_REQ_STRUCT), &StartReq, 0);
+			
+			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_START;
+		}
 		return;
 	}
 
+	pInBss = &pAd->ScanTab.BssEntry[BssIdx];
 	//
 	// Update Reconnect Ssid, that user desired to connect.
 	//
 	NdisZeroMemory(pAd->MlmeAux.AutoReconnectSsid, MAX_LEN_OF_SSID);
-	pAd->MlmeAux.AutoReconnectSsidLen = pAd->ScanTab.BssEntry[BssIdx].SsidLen;
-	NdisMoveMemory(pAd->MlmeAux.AutoReconnectSsid, pAd->ScanTab.BssEntry[BssIdx].Ssid, pAd->ScanTab.BssEntry[BssIdx].SsidLen);	
+	pAd->MlmeAux.AutoReconnectSsidLen = pInBss->SsidLen;
+	NdisMoveMemory(pAd->MlmeAux.AutoReconnectSsid, pInBss->Ssid, pInBss->SsidLen);	
 
 	// copy the matched BSS entry from ScanTab to MlmeAux.SsidBssTab. Why?
 	// Because we need this entry to become the JOIN target in later on SYNC state machine
 	pAd->MlmeAux.BssIdx = 0;
 	pAd->MlmeAux.SsidBssTab.BssNr = 1;
-	NdisMoveMemory(&pAd->MlmeAux.SsidBssTab.BssEntry[0], &pAd->ScanTab.BssEntry[BssIdx], sizeof(BSS_ENTRY));
+	NdisMoveMemory(&pAd->MlmeAux.SsidBssTab.BssEntry[0], pInBss, sizeof(BSS_ENTRY));
 
-	// Add SSID into MlmeAux for site surey joining hidden SSID
-	pAd->MlmeAux.SsidLen = pAd->ScanTab.BssEntry[BssIdx].SsidLen;
-	NdisMoveMemory(pAd->MlmeAux.Ssid, pAd->ScanTab.BssEntry[BssIdx].Ssid, pAd->MlmeAux.SsidLen);
+	// If AP's SSID is not hidden, it is OK for updating ssid to MlmeAux again.
+	if (pInBss->Hidden == 0)
+	{
+		pAd->MlmeAux.SsidLen = pInBss->SsidLen;
+		NdisMoveMemory(pAd->MlmeAux.Ssid, pInBss->Ssid, pAd->MlmeAux.SsidLen);
+	} 
 
 	{
 		if (INFRA_ON(pAd))
@@ -576,7 +632,7 @@ VOID CntlOidRTBssidProc(
 			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - disassociate with current AP ...\n"));
 			DisassocParmFill(pAd, &DisassocReq, pAd->CommonCfg.Bssid, REASON_DISASSOC_STA_LEAVING);
 			MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_DISASSOC_REQ, 
-						sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq);
+						sizeof(MLME_DISASSOC_REQ_STRUCT), &DisassocReq, 0);
 
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_DISASSOC;
 		}
@@ -593,6 +649,7 @@ VOID CntlOidRTBssidProc(
 				DBGPRINT(RT_DEBUG_TRACE, ("NDIS_STATUS_MEDIA_DISCONNECT Event C!\n"));
 			}
 
+			pInBss = &pAd->MlmeAux.SsidBssTab.BssEntry[0];
 			// Change the wepstatus to original wepstatus
 			pAd->StaCfg.WepStatus   = pAd->StaCfg.OrigWepStatus;
 			pAd->StaCfg.PairCipher  = pAd->StaCfg.OrigWepStatus;
@@ -603,43 +660,40 @@ VOID CntlOidRTBssidProc(
 			// We can only connect to AP with less secured cipher setting
 			if ((pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA) || (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPAPSK))
 			{
-				pAd->StaCfg.GroupCipher = pAd->ScanTab.BssEntry[BssIdx].WPA.GroupCipher;
+				pAd->StaCfg.GroupCipher = pInBss->WPA.GroupCipher;
 				
-				if (pAd->StaCfg.WepStatus == pAd->ScanTab.BssEntry[BssIdx].WPA.PairCipher)
-					pAd->StaCfg.PairCipher = pAd->ScanTab.BssEntry[BssIdx].WPA.PairCipher;
-				else if (pAd->ScanTab.BssEntry[BssIdx].WPA.PairCipherAux != Ndis802_11WEPDisabled)
-					pAd->StaCfg.PairCipher = pAd->ScanTab.BssEntry[BssIdx].WPA.PairCipherAux;
+				if (pAd->StaCfg.WepStatus == pInBss->WPA.PairCipher)
+					pAd->StaCfg.PairCipher = pInBss->WPA.PairCipher;
+				else if (pInBss->WPA.PairCipherAux != Ndis802_11WEPDisabled)
+					pAd->StaCfg.PairCipher = pInBss->WPA.PairCipherAux;
 				else	// There is no PairCipher Aux, downgrade our capability to TKIP
 					pAd->StaCfg.PairCipher = Ndis802_11Encryption2Enabled;			
 			}
 			else if ((pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2) || (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2PSK))
 			{
-				pAd->StaCfg.GroupCipher = pAd->ScanTab.BssEntry[BssIdx].WPA2.GroupCipher;
+				pAd->StaCfg.GroupCipher = pInBss->WPA2.GroupCipher;
 				
-				if (pAd->StaCfg.WepStatus == pAd->ScanTab.BssEntry[BssIdx].WPA2.PairCipher)
-					pAd->StaCfg.PairCipher = pAd->ScanTab.BssEntry[BssIdx].WPA2.PairCipher;
-				else if (pAd->ScanTab.BssEntry[BssIdx].WPA2.PairCipherAux != Ndis802_11WEPDisabled)
-					pAd->StaCfg.PairCipher = pAd->ScanTab.BssEntry[BssIdx].WPA2.PairCipherAux;
+				if (pAd->StaCfg.WepStatus == pInBss->WPA2.PairCipher)
+					pAd->StaCfg.PairCipher = pInBss->WPA2.PairCipher;
+				else if (pInBss->WPA2.PairCipherAux != Ndis802_11WEPDisabled)
+					pAd->StaCfg.PairCipher = pInBss->WPA2.PairCipherAux;
 				else	// There is no PairCipher Aux, downgrade our capability to TKIP
 					pAd->StaCfg.PairCipher = Ndis802_11Encryption2Enabled;			
 
 				// RSN capability
-				pAd->StaCfg.RsnCapability = pAd->ScanTab.BssEntry[BssIdx].WPA2.RsnCapability;
+				pAd->StaCfg.RsnCapability = pInBss->WPA2.RsnCapability;
 			}
 			
 			// Set Mix cipher flag
 			pAd->StaCfg.bMixCipher = (pAd->StaCfg.PairCipher == pAd->StaCfg.GroupCipher) ? FALSE : TRUE;
-			/*if (pAd->StaCfg.bMixCipher == TRUE)
-			{
-				// If mix cipher, re-build RSNIE  
-				RTMPMakeRSNIE(pAd, pAd->StaCfg.AuthMode, pAd->StaCfg.WepStatus, 0);
-			}*/
+
+
 			// No active association, join the BSS immediately
 			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - joining %02x:%02x:%02x:%02x:%02x:%02x ...\n",
 				pOidBssid[0],pOidBssid[1],pOidBssid[2],pOidBssid[3],pOidBssid[4],pOidBssid[5]));
 
 			JoinParmFill(pAd, &JoinReq, pAd->MlmeAux.BssIdx);
-			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_JOIN_REQ, sizeof(MLME_JOIN_REQ_STRUCT), &JoinReq);
+			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_JOIN_REQ, sizeof(MLME_JOIN_REQ_STRUCT), &JoinReq, 0);
 
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_JOIN;
 		}
@@ -722,7 +776,7 @@ VOID CntlOidDLSSetupProc(
 				pAd->StaCfg.DLSEntry[i].Valid	= FALSE;
 				pAd->StaCfg.DLSEntry[i].Status	= DLS_NONE;
 				DlsParmFill(pAd, &MlmeDlsReq, &pAd->StaCfg.DLSEntry[i], reason);
-				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_TEAR_DOWN, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq);
+				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_TEAR_DOWN, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq, 0);
 				DBGPRINT(RT_DEBUG_TRACE,("CNTL - start tear down procedure\n"));
 				break;
 			}
@@ -734,7 +788,7 @@ VOID CntlOidDLSSetupProc(
 				//Update countdown timer
 				pAd->StaCfg.DLSEntry[i].CountDownTimer = pAd->StaCfg.DLSEntry[i].TimeOut;
 				DlsParmFill(pAd, &MlmeDlsReq, &pAd->StaCfg.DLSEntry[i], reason);
-				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq);
+				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq, 0);
 				DBGPRINT(RT_DEBUG_TRACE,("CNTL - DLS setup case\n"));
 				break;
 			}
@@ -746,10 +800,10 @@ VOID CntlOidDLSSetupProc(
 				pAd->StaCfg.DLSEntry[i].Valid	= FALSE;
 				pAd->StaCfg.DLSEntry[i].Status	= DLS_NONE;
 				DlsParmFill(pAd, &MlmeDlsReq, &pAd->StaCfg.DLSEntry[i], reason);
-				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_TEAR_DOWN, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq);
+				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_TEAR_DOWN, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq, 0);
 				NdisMoveMemory(&pAd->StaCfg.DLSEntry[i], pDLS, sizeof(RT_802_11_DLS_UI));
 				DlsParmFill(pAd, &MlmeDlsReq, &pAd->StaCfg.DLSEntry[i], reason);
-				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq);
+				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq, 0);
 				DBGPRINT(RT_DEBUG_TRACE,("CNTL - DLS tear down and restart case\n"));
 				break;
 			}
@@ -761,7 +815,7 @@ VOID CntlOidDLSSetupProc(
 				//Update countdown timer
 				pAd->StaCfg.DLSEntry[i].CountDownTimer = pAd->StaCfg.DLSEntry[i].TimeOut;
 				DlsParmFill(pAd, &MlmeDlsReq, &pAd->StaCfg.DLSEntry[i], reason);
-				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq);
+				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq, 0);
 				DBGPRINT(RT_DEBUG_TRACE,("CNTL - DLS update timeout case\n"));
 				break;
 			}
@@ -770,7 +824,7 @@ VOID CntlOidDLSSetupProc(
 			{
 				// 6. re-setup case, start DLS setup procedure (no tear down)
 				DlsParmFill(pAd, &MlmeDlsReq, &pAd->StaCfg.DLSEntry[i], reason);
-				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq);
+				MlmeEnqueue(pAd, DLS_STATE_MACHINE, MT2_MLME_DLS_REQ, sizeof(MLME_DLS_REQ_STRUCT), &MlmeDlsReq, 0);
 				DBGPRINT(RT_DEBUG_TRACE,("CNTL - DLS retry setup procedure\n"));
 				break;
 			}
@@ -802,10 +856,7 @@ VOID CntlWaitDisassocProc(
 	{
 		DBGPRINT(RT_DEBUG_TRACE, ("CNTL - Dis-associate successful\n"));
         
-	    if (pAd->CommonCfg.bWirelessEvent)
-		{				
-			RTMPSendWirelessEvent(pAd, IW_DISASSOC_EVENT_FLAG, pAd->MacTab.Content[BSSID_WCID].Addr, BSS0, 0); 
-		}
+			RTMPSendWirelessEvent(pAd, IW_DISASSOC_EVENT_FLAG, NULL, BSS0, 0); 
         		
 		LinkDown(pAd, FALSE);
 		
@@ -814,7 +865,7 @@ VOID CntlWaitDisassocProc(
 		{
 			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - No matching BSS, start a new ADHOC (Ssid=%s)...\n",pAd->MlmeAux.Ssid));
 			StartParmFill(pAd, &StartReq, (PCHAR)pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen);
-			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_START_REQ, sizeof(MLME_START_REQ_STRUCT), &StartReq);
+			MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_START_REQ, sizeof(MLME_START_REQ_STRUCT), &StartReq, 0);
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_START;
 		}
 		// case 2. try each matched BSS
@@ -822,7 +873,7 @@ VOID CntlWaitDisassocProc(
 		{
 			pAd->MlmeAux.BssIdx = 0;
 
-			IterateOnBssTab(pAd);
+				IterateOnBssTab(pAd);
 		}
 	}
 }
@@ -871,6 +922,8 @@ VOID CntlWaitJoinProc(
 
                 pAd->IndicateMediaState = NdisMediaStateConnected;
                 pAd->ExtraInfo = GENERAL_LINK_UP;
+
+		 			RTMPSendWirelessEvent(pAd, IW_JOIN_IBSS_FLAG, NULL, BSS0, 0);
 			} 
 			// 2. joined a new INFRA network, start from authentication
 			else 
@@ -887,7 +940,7 @@ VOID CntlWaitJoinProc(
 						AuthParmFill(pAd, &AuthReq, pAd->MlmeAux.Bssid, AUTH_MODE_OPEN);
 					}
 					MlmeEnqueue(pAd, AUTH_STATE_MACHINE, MT2_MLME_AUTH_REQ, 
-							sizeof(MLME_AUTH_REQ_STRUCT), &AuthReq);
+							sizeof(MLME_AUTH_REQ_STRUCT), &AuthReq, 0);
 				}
 
 				pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_AUTH;
@@ -975,10 +1028,11 @@ VOID CntlWaitStartProc(
 				BbpRadarDetectionStart(pAd);
 #endif // DFS_SUPPORT //
 			}
-
 			DBGPRINT(RT_DEBUG_TRACE, ("CNTL - start a new IBSS = %02x:%02x:%02x:%02x:%02x:%02x ...\n", 
 				pAd->CommonCfg.Bssid[0],pAd->CommonCfg.Bssid[1],pAd->CommonCfg.Bssid[2],
 				pAd->CommonCfg.Bssid[3],pAd->CommonCfg.Bssid[4],pAd->CommonCfg.Bssid[5]));
+
+		 		RTMPSendWirelessEvent(pAd, IW_START_IBSS_FLAG, NULL, BSS0, 0);
 		}
 		else
 		{
@@ -1015,7 +1069,7 @@ VOID CntlWaitAuthProc(
 
 			{
 				MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_ASSOC_REQ, 
-							sizeof(MLME_ASSOC_REQ_STRUCT), &AssocReq);
+							sizeof(MLME_ASSOC_REQ_STRUCT), &AssocReq, 0);
 
 				pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_ASSOC;
 			}
@@ -1038,7 +1092,7 @@ VOID CntlWaitAuthProc(
 					AuthParmFill(pAd, &AuthReq, pAd->MlmeAux.Bssid, AUTH_MODE_OPEN);
 				}
 				MlmeEnqueue(pAd, AUTH_STATE_MACHINE, MT2_MLME_AUTH_REQ, 
-							sizeof(MLME_AUTH_REQ_STRUCT), &AuthReq);
+							sizeof(MLME_AUTH_REQ_STRUCT), &AuthReq, 0);
 				
 			}
 			pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_AUTH2;
@@ -1072,7 +1126,7 @@ VOID CntlWaitAuthProc2(
 							  ASSOC_TIMEOUT, pAd->StaCfg.DefaultListenCount);
 			{
 				MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_ASSOC_REQ, 
-							sizeof(MLME_ASSOC_REQ_STRUCT), &AssocReq);
+						sizeof(MLME_ASSOC_REQ_STRUCT), &AssocReq, 0);
 
 				pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_ASSOC;
 			}
@@ -1085,7 +1139,7 @@ VOID CntlWaitAuthProc2(
 				DBGPRINT(RT_DEBUG_TRACE, ("CNTL - AUTH FAIL, try OPEN system...\n"));
 				AuthParmFill(pAd, &AuthReq, pAd->MlmeAux.Bssid, Ndis802_11AuthModeOpen);
 				MlmeEnqueue(pAd, AUTH_STATE_MACHINE, MT2_MLME_AUTH_REQ, 
-							sizeof(MLME_AUTH_REQ_STRUCT), &AuthReq);
+							sizeof(MLME_AUTH_REQ_STRUCT), &AuthReq, 0);
 
 				pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_AUTH2;
 			}
@@ -1120,10 +1174,7 @@ VOID CntlWaitAssocProc(
 		NdisMoveMemory(&Reason, Elem->Msg, sizeof(USHORT));
 		if (Reason == MLME_SUCCESS) 
 		{
-			if (pAd->CommonCfg.bWirelessEvent)
-			{				
-				RTMPSendWirelessEvent(pAd, IW_ASSOC_EVENT_FLAG, pAd->MacTab.Content[BSSID_WCID].Addr, BSS0, 0); 
-			}
+				RTMPSendWirelessEvent(pAd, IW_ASSOC_EVENT_FLAG, NULL, BSS0, 0); 
 			
 			LinkUp(pAd, BSS_INFRA);
 			pAd->Mlme.CntlMachine.CurrState = CNTL_IDLE;
@@ -1159,8 +1210,8 @@ VOID CntlWaitReassocProc(
 		if (Result == MLME_SUCCESS) 
 		{
 			// send wireless event - for association
-			if (pAd->CommonCfg.bWirelessEvent)
-				RTMPSendWirelessEvent(pAd, IW_ASSOC_EVENT_FLAG, pAd->MacTab.Content[BSSID_WCID].Addr, BSS0, 0);			
+				RTMPSendWirelessEvent(pAd, IW_ASSOC_EVENT_FLAG, NULL, BSS0, 0);
+
 
 			// 
 			// NDIS requires a new Link UP indication but no Link Down for RE-ASSOC
@@ -1235,9 +1286,13 @@ VOID LinkUp(
 	BOOLEAN	Cancelled;
 	UCHAR	Value = 0, idx = 0, HashIdx = 0;
 	MAC_TABLE_ENTRY *pEntry = NULL, *pCurrEntry = NULL;
-
+	
+	
 	// Init ChannelQuality to prevent DEAD_CQI at initial LinkUp
 	pAd->Mlme.ChannelQuality = 50;
+
+	// init to not doing improved scan
+	pAd->StaCfg.bImprovedScan = FALSE;
 
 	pEntry = MacTableLookup(pAd, pAd->CommonCfg.Bssid);
 	if (pEntry)
@@ -1266,7 +1321,6 @@ VOID LinkUp(
 	COPY_HTSETTINGS_FROM_MLME_AUX_TO_ACTIVE_CFG(pAd);
 #endif // DOT11_N_SUPPORT //
 
-
 	if (BssType == BSS_ADHOC)
 	{
 		OPSTATUS_SET_FLAG(pAd, fOP_STATUS_ADHOC_ON);
@@ -1283,6 +1337,8 @@ VOID LinkUp(
 			AdhocTurnOnQos(pAd);
 #endif // DOT11_N_SUPPORT //
 
+		InitChannelRelatedValue(pAd);
+
 		DBGPRINT(RT_DEBUG_TRACE, ("!!!Adhoc LINK UP !!! \n" ));
 	}
 	else
@@ -1293,108 +1349,7 @@ VOID LinkUp(
 		DBGPRINT(RT_DEBUG_TRACE, ("!!!Infra LINK UP !!! \n" ));
 	}
 	
-		// 3*3
-		// reset Tx beamforming bit
-		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &Value);
-		Value &= (~0x01);
-		Value |= pAd->CommonCfg.RegTransmitSetting.field.TxBF;
-		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, Value);
 
-#ifdef DOT11_N_SUPPORT
-    	// Change to AP channel
-        if ((pAd->CommonCfg.CentralChannel > pAd->CommonCfg.Channel) && (pAd->MlmeAux.HtCapability.HtCapInfo.ChannelWidth == BW_40))
-    	{	
-    		// Must using 40MHz.
-    		pAd->CommonCfg.BBPCurrentBW = BW_40;
-    		AsicSwitchChannel(pAd, pAd->CommonCfg.CentralChannel, FALSE);
-    		AsicLockChannel(pAd, pAd->CommonCfg.CentralChannel);
-    			
-    		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &Value);
-    		Value &= (~0x18);
-    		Value |= 0x10;
-    		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, Value);
-    		
-    		//  RX : control channel at lower 
-    		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R3, &Value);
-    		Value &= (~0x20);
-    		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R3, Value);
-
-    		RTMP_IO_READ32(pAd, TX_BAND_CFG, &Data);
-    		Data &= 0xfffffffe;
-    		RTMP_IO_WRITE32(pAd, TX_BAND_CFG, Data);
-    		
-    		if (pAd->MACVersion == 0x28600100)
-    		{
-    			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R69, 0x1A);
-    			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R70, 0x0A);
-    			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R73, 0x16);
-                DBGPRINT(RT_DEBUG_TRACE, ("!!!rt2860C !!! \n" ));
-    		}	
-
-    		DBGPRINT(RT_DEBUG_TRACE, ("!!!40MHz Lower LINK UP !!! Control Channel at Below. Central = %d \n", pAd->CommonCfg.CentralChannel ));
-    	}
-		else if ((pAd->CommonCfg.CentralChannel < pAd->CommonCfg.Channel) && (pAd->MlmeAux.HtCapability.HtCapInfo.ChannelWidth == BW_40))
-	    {	
-		    // Must using 40MHz.
-			pAd->CommonCfg.BBPCurrentBW = BW_40;
-			AsicSwitchChannel(pAd, pAd->CommonCfg.CentralChannel, FALSE);
-		    AsicLockChannel(pAd, pAd->CommonCfg.CentralChannel);
-			
-			RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &Value);
-    		Value &= (~0x18);
-    		Value |= 0x10;
-			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, Value);
-			
-    		RTMP_IO_READ32(pAd, TX_BAND_CFG, &Data);
-    		Data |= 0x1;
-    		RTMP_IO_WRITE32(pAd, TX_BAND_CFG, Data);
-			
-			RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R3, &Value);
-		    Value |= (0x20);
-			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R3, Value);
-		
-    		if (pAd->MACVersion == 0x28600100)
-    		{
-    			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R69, 0x1A);
-    			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R70, 0x0A);
-    			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R73, 0x16);
-    			    DBGPRINT(RT_DEBUG_TRACE, ("!!!rt2860C !!! \n" ));
-    		}
-
-		    DBGPRINT(RT_DEBUG_TRACE, ("!!! 40MHz Upper LINK UP !!! Control Channel at UpperCentral = %d \n", pAd->CommonCfg.CentralChannel ));
-	    }
-	    else
-#endif // DOT11_N_SUPPORT //
-	    {
-		    pAd->CommonCfg.BBPCurrentBW = BW_20;
-		pAd->CommonCfg.CentralChannel = pAd->CommonCfg.Channel;
-			AsicSwitchChannel(pAd, pAd->CommonCfg.Channel, FALSE);
-			AsicLockChannel(pAd, pAd->CommonCfg.Channel);
-			
-			RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &Value);
-			Value &= (~0x18);
-			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, Value);
-			
-			RTMP_IO_READ32(pAd, TX_BAND_CFG, &Data);
-			Data &= 0xfffffffe;
-			RTMP_IO_WRITE32(pAd, TX_BAND_CFG, Data);
-			
-			RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R3, &Value);
-			Value &= (~0x20);
-			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R3, Value);
-			
-			if (pAd->MACVersion == 0x28600100)
-			{
-				RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R69, 0x16);
-				RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R70, 0x08);
-				RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R73, 0x11);
-				DBGPRINT(RT_DEBUG_TRACE, ("!!!rt2860C !!! \n" ));
-			}
-			
-		    DBGPRINT(RT_DEBUG_TRACE, ("!!! 20MHz LINK UP !!! \n" ));
-	}
-
-	RTMPSetAGCInitValue(pAd, pAd->CommonCfg.BBPCurrentBW);
 	//
 	// Save BBP_R66 value, it will be used in RTUSBResumeMsduTransmission
 	//
@@ -1474,23 +1429,32 @@ VOID LinkUp(
         
 		if (pAd->StaCfg.WepStatus == Ndis802_11WEPEnabled)
 		{			
-			PUCHAR	Key; 			
 			UCHAR 	CipherAlg;
 			
 			for (idx=0; idx < SHARE_KEY_NUM; idx++)
         	{
 				CipherAlg = pAd->SharedKey[BSS0][idx].CipherAlg;
-    			Key = pAd->SharedKey[BSS0][idx].Key;
 			
 				if (pAd->SharedKey[BSS0][idx].KeyLen > 0)
 				{
 					// Set key material and cipherAlg to Asic
-    				AsicAddSharedKeyEntry(pAd, BSS0, idx, CipherAlg, Key, NULL, NULL);						
+    				AsicAddSharedKeyEntry(pAd, BSS0, idx, &pAd->SharedKey[BSS0][idx]);						
                     
                     if (idx == pAd->StaCfg.DefaultKeyId)
 					{
-						// Update WCID attribute table and IVEIV table for this group key table  
-						RTMPAddWcidAttributeEntry(pAd, BSS0, idx, CipherAlg, NULL);
+						INT	cnt;
+					
+						/* Generate 3-bytes IV randomly for software encryption using */						
+				    	for(cnt = 0; cnt < LEN_WEP_TSC; cnt++)
+							pAd->SharedKey[BSS0][idx].TxTsc[cnt] = RandomByte(pAd);   
+					
+						/* Update WCID attribute table and IVEIV table for this group key table */
+						RTMPSetWcidSecurityInfo(pAd, 
+												BSS0, 
+												idx, 												
+												CipherAlg,
+												MCAST_WCID, 
+												SHAREDKEYTABLE);	
 					}
 				}	
 
@@ -1504,13 +1468,13 @@ VOID LinkUp(
 			pAd->StaCfg.DefaultKeyId = 0;	// always be zero
 		
             NdisZeroMemory(&pAd->SharedKey[BSS0][0], sizeof(CIPHER_KEY));  
-							pAd->SharedKey[BSS0][0].KeyLen = LEN_TKIP_EK;
-			NdisMoveMemory(pAd->SharedKey[BSS0][0].Key, pAd->StaCfg.PMK, LEN_TKIP_EK);
+							pAd->SharedKey[BSS0][0].KeyLen = LEN_TK;
+			NdisMoveMemory(pAd->SharedKey[BSS0][0].Key, pAd->StaCfg.PMK, LEN_TK);
             
             if (pAd->StaCfg.PairCipher == Ndis802_11Encryption2Enabled)
             {
-    			NdisMoveMemory(pAd->SharedKey[BSS0][0].RxMic, &pAd->StaCfg.PMK[16], LEN_TKIP_RXMICK);
-    			NdisMoveMemory(pAd->SharedKey[BSS0][0].TxMic, &pAd->StaCfg.PMK[16], LEN_TKIP_TXMICK);
+    			NdisMoveMemory(pAd->SharedKey[BSS0][0].RxMic, &pAd->StaCfg.PMK[16], LEN_TKIP_MIC);
+    			NdisMoveMemory(pAd->SharedKey[BSS0][0].TxMic, &pAd->StaCfg.PMK[16], LEN_TKIP_MIC);
             }
 
 			// Decide its ChiperAlg
@@ -1528,16 +1492,54 @@ VOID LinkUp(
 			AsicAddSharedKeyEntry(pAd, 
 								  BSS0, 
 								  0, 
-								  pAd->SharedKey[BSS0][0].CipherAlg, 
-								  pAd->SharedKey[BSS0][0].Key, 
-								  pAd->SharedKey[BSS0][0].TxMic, 
-								  pAd->SharedKey[BSS0][0].RxMic);	
+								  &pAd->SharedKey[BSS0][0]);	
 
-            // Update WCID attribute table and IVEIV table for this group key table  
-			RTMPAddWcidAttributeEntry(pAd, BSS0, 0, pAd->SharedKey[BSS0][0].CipherAlg, NULL);
-            
+			/* Update WCID attribute table and IVEIV table for this group key table */
+			RTMPSetWcidSecurityInfo(pAd, 
+									BSS0, 
+									0, 												
+									pAd->SharedKey[BSS0][0].CipherAlg,
+									MCAST_WCID, 
+									SHAREDKEYTABLE);	
 		}
+		else if (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2PSK)
+		{
+            USHORT		Wcid = 0;
+
+			pAd->StaCfg.DefaultKeyId = 0;	// always be zero
 		
+			/* Generate GMK and GNonce randomly */
+    		GenRandom(pAd, pAd->CommonCfg.Bssid, pAd->StaCfg.GMK);
+	    	GenRandom(pAd, pAd->CommonCfg.Bssid, pAd->StaCfg.GNonce);		
+
+    		/* Derive GTK per BSSID */
+    		WpaDeriveGTK(pAd->StaCfg.GMK, 
+    					pAd->StaCfg.GNonce, 
+    					pAd->CurrentAddress, 
+    					pAd->StaCfg.GTK, 
+    					LEN_TKIP_GTK);
+
+            if (pAd->StaCfg.GroupCipher == Ndis802_11Encryption3Enabled) {
+                NdisZeroMemory(&pAd->StaCfg.TxGTK, sizeof(CIPHER_KEY));                
+                NdisMoveMemory(pAd->StaCfg.TxGTK.Key, pAd->StaCfg.GTK, LEN_TK);
+                pAd->StaCfg.TxGTK.CipherAlg = CIPHER_AES;
+                pAd->StaCfg.TxGTK.KeyLen= LEN_TK;
+
+        		/* Add Pair-wise key to Asic */
+                GET_GroupKey_WCID(Wcid, BSS0);
+        	    AsicAddPairwiseKeyEntry(
+        	        pAd, 
+        	        (UCHAR)Wcid, 
+        	        &pAd->StaCfg.TxGTK);
+
+        		RTMPSetWcidSecurityInfo(pAd, 
+        								BSS0, 
+        								0, 
+        								pAd->StaCfg.TxGTK.CipherAlg,
+        								(UCHAR)Wcid, 
+        								PAIRWISEKEYTABLE);	
+            }
+		}		
 	}
 	else // BSS_INFRA
 	{
@@ -1566,20 +1568,33 @@ VOID LinkUp(
 		//
 		if (pAd->StaCfg.AuthMode >= Ndis802_11AuthModeWPA)
 		{
-			ULONG 		IV;
+			//ULONG 		IV;
 			
 			// Remove all WPA keys 
+#ifdef PCIE_PS_SUPPORT 
 			RTMP_CLEAR_PSFLAG(pAd, fRTMP_PS_CAN_GO_SLEEP);
+#endif // PCIE_PS_SUPPORT //
+
 			RTMPWPARemoveAllKeys(pAd);
 			pAd->StaCfg.PortSecured = WPA_802_1X_PORT_NOT_SECURED;			
 			pAd->StaCfg.PrivacyFilter = Ndis802_11PrivFilter8021xWEP;
 			
-			// Fixed connection failed with Range Maximizer - 515 AP (Marvell Chip) when security is WPAPSK/TKIP
-			// If IV related values are too large in GroupMsg2, AP would ignore this message.
-			IV = 1;
-			IV |= (pAd->StaCfg.DefaultKeyId << 30);	
-			AsicUpdateWCIDIVEIV(pAd, BSSID_WCID, IV, 0);
-			//RTMP_CLEAR_PSFLAG(pAd, fRTMP_PS_CAN_GO_SLEEP);
+
+#ifdef SOFT_ENCRYPT
+			/* There are some situation to need to encryption by software 			   	
+			   1. The Client support PMF. It shall ony support AES cipher.
+			   2. The Client support WAPI.
+			   If use RT3883 or later, HW can handle the above.	
+			   */
+			if (!(IS_HW_WAPI_SUPPORT(pAd)) && 
+				(FALSE
+				))
+			{
+				CLIENT_STATUS_SET_FLAG(pEntry, fCLIENT_STATUS_SOFTWARE_ENCRYPT);
+			}
+#endif // SOFT_ENCRYPT //
+
+			
 		}
 
 		// NOTE:
@@ -1609,27 +1624,25 @@ VOID LinkUp(
 		if (pAd->StaCfg.WepStatus == Ndis802_11WEPEnabled)
 #endif // WPA_SUPPLICANT_SUPPORT //            
 		{			
-			PUCHAR	Key; 			
 			UCHAR 	CipherAlg;
 			
 			for (idx=0; idx < SHARE_KEY_NUM; idx++)
         	{
 				CipherAlg = pAd->SharedKey[BSS0][idx].CipherAlg;
-    			Key = pAd->SharedKey[BSS0][idx].Key;
 			
 				if (pAd->SharedKey[BSS0][idx].KeyLen > 0)
 				{
 					// Set key material and cipherAlg to Asic
-    				AsicAddSharedKeyEntry(pAd, BSS0, idx, CipherAlg, Key, NULL, NULL);	
+    				AsicAddSharedKeyEntry(pAd, BSS0, idx, &pAd->SharedKey[BSS0][idx]);	
 
 					if (idx == pAd->StaCfg.DefaultKeyId)
 					{
-						// Assign group key info  
-						RTMPAddWcidAttributeEntry(pAd, BSS0, idx, CipherAlg, NULL);
+						/* STA doesn't need to set WCID attribute for group key */
 
+						/* Assign pairwise key info to Asic */
 						pEntry->Aid = BSSID_WCID;
-						// Assign pairwise key info
-						RTMPAddWcidAttributeEntry(pAd, BSS0, idx, CipherAlg, pEntry);	
+						RTMPSetWcidSecurityInfo(pAd, BSS0, idx, 
+												CipherAlg, pEntry->Aid, SHAREDKEYTABLE);
 					}
 				}	
 			}    		   		  		   					
@@ -1653,6 +1666,7 @@ VOID LinkUp(
 			if (pAd->StaCfg.WpaSupplicantUP == WPA_SUPPLICANT_DISABLE)
 #endif // WPA_SUPPLICANT_SUPPORT //
 				RTMPSetTimer(&pAd->Mlme.LinkDownTimer, LINK_DOWN_TIMEOUT);
+
 		}
         // --
 
@@ -1679,7 +1693,7 @@ VOID LinkUp(
 		RTMPMoveMemory(pEntry->Addr, pAd->CommonCfg.Bssid, MAC_ADDR_LEN);
 		pEntry->Aid = BSSID_WCID;
 		pEntry->pAd = pAd;
-		pEntry->ValidAsCLI = TRUE;	//Although this is bssid..still set ValidAsCl
+		SET_ENTRY_CLIENT(pEntry);
 		pAd->MacTab.Size = 1;	// infra mode always set MACtab size =1.
 		pEntry->Sst = SST_ASSOC;
 		pEntry->AuthState = SST_ASSOC;
@@ -1712,36 +1726,36 @@ VOID LinkUp(
 		{
 			if ((pAd->CommonCfg.bPiggyBackCapable) && (pAd->MlmeAux.APRalinkIe & 0x00000003) == 3)
 			{
-
 				OPSTATUS_SET_FLAG(pAd, fOP_STATUS_PIGGYBACK_INUSED);
 				OPSTATUS_SET_FLAG(pAd, fOP_STATUS_AGGREGATION_INUSED);
 				CLIENT_STATUS_SET_FLAG(pEntry, fCLIENT_STATUS_AGGREGATION_CAPABLE);
 				CLIENT_STATUS_SET_FLAG(pEntry, fCLIENT_STATUS_PIGGYBACK_CAPABLE);
-				RTMPSetPiggyBack(pAd, TRUE);
+                RTMPSetPiggyBack(pAd, TRUE);
 				DBGPRINT(RT_DEBUG_TRACE, ("Turn on Piggy-Back\n"));
 			}
 			else if (pAd->MlmeAux.APRalinkIe & 0x00000001)
 			{
-				CLIENT_STATUS_SET_FLAG(pEntry, fCLIENT_STATUS_AGGREGATION_CAPABLE);
 				OPSTATUS_SET_FLAG(pAd, fOP_STATUS_AGGREGATION_INUSED);
+				CLIENT_STATUS_SET_FLAG(pEntry, fCLIENT_STATUS_AGGREGATION_CAPABLE);
+				DBGPRINT(RT_DEBUG_TRACE, ("Ralink Aggregation\n"));
 			}
 		}
 		
 		if (pAd->MlmeAux.APRalinkIe != 0x0)
 		{
 #ifdef DOT11_N_SUPPORT		
-			if (CLIENT_STATUS_TEST_FLAG(&pAd->MacTab.Content[BSSID_WCID], fCLIENT_STATUS_RDG_CAPABLE))
+			if (CLIENT_STATUS_TEST_FLAG(pEntry, fCLIENT_STATUS_RDG_CAPABLE))
 			{
 				AsicEnableRDG(pAd);
 			}
 #endif // DOT11_N_SUPPORT //
 			OPSTATUS_SET_FLAG(pAd, fCLIENT_STATUS_RALINK_CHIPSET);
-			CLIENT_STATUS_SET_FLAG(&pAd->MacTab.Content[BSSID_WCID], fCLIENT_STATUS_RALINK_CHIPSET);
+			CLIENT_STATUS_SET_FLAG(pEntry, fCLIENT_STATUS_RALINK_CHIPSET);
 		}
 		else
 		{
 			OPSTATUS_CLEAR_FLAG(pAd, fCLIENT_STATUS_RALINK_CHIPSET);
-			CLIENT_STATUS_CLEAR_FLAG(&pAd->MacTab.Content[BSSID_WCID], fCLIENT_STATUS_RALINK_CHIPSET);
+			CLIENT_STATUS_CLEAR_FLAG(pEntry, fCLIENT_STATUS_RALINK_CHIPSET);
 		}
 	}
 
@@ -1750,8 +1764,10 @@ VOID LinkUp(
 	DBGPRINT(RT_DEBUG_TRACE, ("NDIS_STATUS_MEDIA_CONNECT Event B!.BACapability = %x. ClientStatusFlags = %lx\n", pAd->CommonCfg.BACapability.word, pAd->MacTab.Content[BSSID_WCID].ClientStatusFlags));
 #endif // DOT11_N_SUPPORT //
 
+#ifdef LED_CONTROL_SUPPORT
 	// Set LED
 	RTMPSetLED(pAd, LED_LINK_UP);
+#endif // LED_CONTROL_SUPPORT //
 	
 	pAd->Mlme.PeriodicRound = 0;
 	pAd->Mlme.OneSecPeriodicRound = 0;
@@ -1795,9 +1811,22 @@ VOID LinkUp(
 	{
 		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R1, &Value);
 		Value &= (~0x18);
-		if (pAd->Antenna.field.TxPath == 2)
+
+#ifdef RT3593
+		if (IS_RT3593(pAd))
 		{
-		    Value |= 0x10;
+			if (pAd->Antenna.field.TxPath == 3)
+				Value |= 0x10;
+			else if (pAd->Antenna.field.TxPath == 2)
+				Value |= 0x08;		
+		}
+		else
+#endif // RT3593 //
+		{
+			if (pAd->Antenna.field.TxPath == 2)
+			{
+			    Value |= 0x10;
+			}
 		}
 		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R1, Value);
 	}
@@ -1889,6 +1918,23 @@ VOID LinkUp(
 #endif // DOT11_N_SUPPORT //
 
 	pAd->CommonCfg.IOTestParm.bLastAtheros = FALSE;
+
+#ifdef WPA_SUPPLICANT_SUPPORT
+	/*
+		If STA connects to different AP, STA couldn't send EAPOL_Start for WpaSupplicant.
+	*/
+	if ((pAd->StaCfg.BssType == BSS_INFRA) &&
+		(pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2) &&
+		(NdisEqualMemory(pAd->CommonCfg.Bssid, pAd->CommonCfg.LastBssid, MAC_ADDR_LEN) == FALSE) &&
+		(pAd->StaCfg.bLostAp == TRUE))
+	{
+		pAd->StaCfg.bLostAp = FALSE;
+	}
+#endif // WPA_SUPPLICANT_SUPPORT //
+	/*
+		Need to check this COPY. This COPY is from Windows Driver.
+	*/
+
 	COPY_MAC_ADDR(pAd->CommonCfg.LastBssid, pAd->CommonCfg.Bssid);
 	DBGPRINT(RT_DEBUG_TRACE, ("!!!pAd->bNextDisableRxBA= %d \n", pAd->CommonCfg.IOTestParm.bNextDisableRxBA));
 	// BSSID add in one MAC entry too.  Because in Tx, ASIC need to check Cipher and IV/EIV, BAbitmap
@@ -1928,17 +1974,91 @@ VOID LinkUp(
 	}
 
 	RTMP_CLEAR_FLAG(pAd, fRTMP_ADAPTER_BSS_SCAN_IN_PROGRESS);
-	RTMP_CLEAR_PSFLAG(pAd, fRTMP_PS_GO_TO_SLEEP_NOW);
+	//RTMP_CLEAR_PSFLAG(pAd, fRTMP_PS_GO_TO_SLEEP_NOW);
+
 
 #ifdef DOT11_N_SUPPORT
 #ifdef DOT11N_DRAFT3
-	if ((pAd->CommonCfg.BACapability.field.b2040CoexistScanSup) && (pAd->CommonCfg.Channel <= 11))
+	if (INFRA_ON(pAd))
+	{
+		if ((pAd->CommonCfg.bBssCoexEnable == TRUE) && (pAd->CommonCfg.Channel <= 14)
+			&& (pAd->StaActive.SupportedPhyInfo.bHtEnable == TRUE) && (pAd->MlmeAux.ExtCapInfo.BssCoexistMgmtSupport == 1))
 	{
 		OPSTATUS_SET_FLAG(pAd, fOP_STATUS_SCAN_2040);
 		BuildEffectedChannelList(pAd);
+			//pAd->CommonCfg.ScanParameter.Dot11BssWidthTriggerScanInt = 150;
+			DBGPRINT(RT_DEBUG_TRACE, ("LinkUP AP supports 20/40 BSS COEX !!! Dot11BssWidthTriggerScanInt[%d]\n",pAd->CommonCfg.Dot11BssWidthTriggerScanInt));	
+		}
+		else
+		{
+			DBGPRINT(RT_DEBUG_TRACE, ("not supports 20/40 BSS COEX !!! \n"));
+			DBGPRINT(RT_DEBUG_TRACE, ("pAd->CommonCfg.bBssCoexEnable %d !!! \n", pAd->CommonCfg.bBssCoexEnable));			
+			DBGPRINT(RT_DEBUG_TRACE, ("pAd->CommonCfg.Channel %d !!! \n",pAd->CommonCfg.Channel));			
+			DBGPRINT(RT_DEBUG_TRACE, ("pAd->StaActive.SupportedHtPhy.bHtEnable %d !!! \n",pAd->StaActive.SupportedPhyInfo.bHtEnable));				
+			DBGPRINT(RT_DEBUG_TRACE, ("pAd->MlmeAux.ExtCapInfo.BssCoexstSup %d !!! \n",pAd->MlmeAux.ExtCapInfo.BssCoexistMgmtSupport));				
+			DBGPRINT(RT_DEBUG_TRACE, ("pAd->CommonCfg.CentralChannel %d !!! \n",pAd->CommonCfg.CentralChannel));				
+			DBGPRINT(RT_DEBUG_TRACE, ("pAd->CommonCfg.PhyMode %d !!! \n",pAd->CommonCfg.PhyMode));		
+		}
 	}
 #endif // DOT11N_DRAFT3 //
 #endif // DOT11_N_SUPPORT //
+
+#ifdef WPA_SUPPLICANT_SUPPORT
+	/*
+		When AuthMode is WPA2-Enterprise and AP reboot or STA lost AP, 
+		WpaSupplicant would not send EapolStart to AP after STA re-connect to AP again.
+		In this case, driver would send EapolStart to AP.
+	*/
+	if ((pAd->StaCfg.BssType == BSS_INFRA) &&
+		(pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2) &&
+		(NdisEqualMemory(pAd->CommonCfg.Bssid, pAd->CommonCfg.LastBssid, MAC_ADDR_LEN)) &&
+		(pAd->StaCfg.bLostAp == TRUE))
+	{
+		WpaSendEapolStart(pAd, pAd->CommonCfg.Bssid);		
+		pAd->StaCfg.bLostAp = FALSE;
+	}
+#endif // WPA_SUPPLICANT_SUPPORT //
+
+#ifdef RTMP_INTERNAL_TX_ALC
+	// Initialize the index of the internal Tx ALC table
+	if (pAd->TxPowerCtrl.bInternalTxALC == TRUE)
+	{
+		UCHAR index = 0;
+
+		for (index = 0; index < MAX_NUM_OF_CHANNELS; index++)
+		{
+			if (pAd->CommonCfg.Channel == pAd->TxPower[index].Channel)
+			{
+				pAd->TxPowerCtrl.idxTxPowerTable = pAd->TxPower[index].Power;
+				break;
+			}
+		}
+
+		if (pAd->CommonCfg.Channel <= 14)
+		{
+			//
+			// The boundary verification
+			//
+			if ((pAd->TxPowerCtrl.idxTxPowerTable < LOWERBOUND_TX_POWER_TUNING_ENTRY) || 
+			    (pAd->TxPowerCtrl.idxTxPowerTable > UPPERBOUND_TX_POWER_TUNING_ENTRY))
+			{
+				pAd->TxPowerCtrl.idxTxPowerTable = 0; // default array index
+			}
+
+			DBGPRINT(RT_DEBUG_TRACE, ("%s: pAd->TxPowerCtrl.idxTxPowerTable = %d\n", 
+				__FUNCTION__, 
+				pAd->TxPowerCtrl.idxTxPowerTable));
+		}
+		else
+		{
+			pAd->TxPowerCtrl.idxTxPowerTable = 0; // default array index
+
+			DBGPRINT(RT_DEBUG_ERROR, ("%s: pAd->TxPowerCtrl.idxTxPowerTable = %d\n", 
+				__FUNCTION__, 
+				pAd->TxPowerCtrl.idxTxPowerTable));
+		}
+	}
+#endif // RTMP_INTERNAL_TX_ALC //
 }
 
 /*
@@ -1972,34 +2092,40 @@ VOID LinkDown(
 {
 	UCHAR			    i, ByteValue = 0;
 
-	BOOLEAN		Cancelled;
-
 	// Do nothing if monitor mode is on
 	if (MONITOR_ON(pAd))
 		return;
-
+	pAd->StaCfg.bImprovedScan = FALSE;
 #ifdef RALINK_ATE
 	// Nothing to do in ATE mode. 
 	if (ATE_ON(pAd))
 		return;
 #endif // RALINK_ATE //    
-	RTMP_CLEAR_PSFLAG(pAd, fRTMP_PS_GO_TO_SLEEP_NOW);
-	//Comment the codes, beasue the line 2291 call the same function.
-	//RTMPCancelTimer(&pAd->Mlme.PsPollTimer,		&Cancelled);
+
+#ifdef PCIE_PS_SUPPORT
 	// Not allow go to sleep within linkdown function.
 	RTMP_CLEAR_PSFLAG(pAd, fRTMP_PS_CAN_GO_SLEEP);
+#endif // PCIE_PS_SUPPORT //
 
-    if (pAd->CommonCfg.bWirelessEvent)
-	{				
-		RTMPSendWirelessEvent(pAd, IW_STA_LINKDOWN_EVENT_FLAG, pAd->MacTab.Content[BSSID_WCID].Addr, BSS0, 0); 
-	}
+
+		RTMPSendWirelessEvent(pAd, IW_STA_LINKDOWN_EVENT_FLAG, NULL, BSS0, 0); 
 
 	DBGPRINT(RT_DEBUG_TRACE, ("!!! LINK DOWN !!!\n"));
 	OPSTATUS_CLEAR_FLAG(pAd, fOP_STATUS_AGGREGATION_INUSED);
     
+#ifdef PCIE_PS_SUPPORT
 
+    if (OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_ADVANCE_POWER_SAVE_PCIE_DEVICE))
+    {
+	    BOOLEAN Cancelled;
+        pAd->Mlme.bPsPollTimerRunning = FALSE;
+        RTMPCancelTimer(&pAd->Mlme.PsPollTimer,	&Cancelled);
+    }
+
+	pAd->bPCIclkOff = FALSE;  
+#endif // PCIE_PS_SUPPORT //
     if (OPSTATUS_TEST_FLAG(pAd, fOP_STATUS_DOZE)
-||	RTMP_TEST_PSFLAG(pAd, fRTMP_PS_SET_PCI_CLK_OFF_COMMAND) 
+/*||	RTMP_TEST_PSFLAG(pAd, fRTMP_PS_SET_PCI_CLK_OFF_COMMAND) */
 		|| RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_IDLE_RADIO_OFF))
     {
         AUTO_WAKEUP_STRUC AutoWakeupCfg;
@@ -2008,9 +2134,21 @@ VOID LinkDown(
 	    RTMP_IO_WRITE32(pAd, AUTO_WAKEUP_CFG, AutoWakeupCfg.word);
         OPSTATUS_CLEAR_FLAG(pAd, fOP_STATUS_DOZE);
     }
+
 	if (ADHOC_ON(pAd))		// Adhoc mode link down
 	{
 		DBGPRINT(RT_DEBUG_TRACE, ("!!! LINK DOWN 1!!!\n"));
+
+        // In an IBSS, a STA's SME responds to Deauthenticate frames from a STA by 
+        // deleting the PTKSA associated with that STA. (Spec. P802.11i/D10 P.19)
+        if (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2PSK)
+        {
+        	for (i=1; i<MAX_LEN_OF_MAC_TABLE; i++)
+            {
+                if (IS_ENTRY_CLIENT(&pAd->MacTab.Content[i]))
+                    MlmeDeAuthAction(pAd, &pAd->MacTab.Content[i], REASON_DEAUTH_STA_LEAVING, FALSE);
+            }
+        }
 
 		OPSTATUS_CLEAR_FLAG(pAd, fOP_STATUS_ADHOC_ON);
 			OPSTATUS_CLEAR_FLAG(pAd, fOP_STATUS_MEDIA_STATE_CONNECTED);
@@ -2051,8 +2189,11 @@ VOID LinkDown(
 		}
 #endif // QOS_DLS_SUPPORT //
 
+
+
 		OPSTATUS_CLEAR_FLAG(pAd, fOP_STATUS_INFRA_ON); 
 		OPSTATUS_CLEAR_FLAG(pAd, fOP_STATUS_MEDIA_STATE_CONNECTED); 
+
 
 		// Saved last SSID for linkup comparison
 		pAd->CommonCfg.LastSsidLen = pAd->CommonCfg.SsidLen;
@@ -2068,13 +2209,17 @@ VOID LinkDown(
 		}
 		else
 		{
-            //
-			// If disassociation request is from NDIS, then we don't need to delete BSSID from entry.
-			// Otherwise lost beacon or receive De-Authentication from AP, 
-			// then we should delete BSSID from BssTable.
-			// If we don't delete from entry, roaming will fail.
-			//
-			BssTableDeleteEntry(&pAd->ScanTab, pAd->CommonCfg.Bssid, pAd->CommonCfg.Channel);
+			if ((pAd->StaCfg.PortSecured == WPA_802_1X_PORT_SECURED) ||
+				(pAd->StaCfg.AuthMode < Ndis802_11AuthModeWPA))
+			{
+	            //
+				// If disassociation request is from NDIS, then we don't need to delete BSSID from entry.
+				// Otherwise lost beacon or receive De-Authentication from AP, 
+				// then we should delete BSSID from BssTable.
+				// If we don't delete from entry, roaming will fail.
+				//
+				BssTableDeleteEntry(&pAd->ScanTab, pAd->CommonCfg.Bssid, pAd->CommonCfg.Channel);
+			}
 		}
 
 		// restore back to - 
@@ -2098,35 +2243,33 @@ VOID LinkDown(
 
 	for (i=1; i<MAX_LEN_OF_MAC_TABLE; i++)
 	{
-		if (pAd->MacTab.Content[i].ValidAsCLI == TRUE)
+		if (IS_ENTRY_CLIENT(&pAd->MacTab.Content[i]))
 			MacTableDeleteEntry(pAd, pAd->MacTab.Content[i].Aid, pAd->MacTab.Content[i].Addr);
 	}
 	
 	AsicSetSlotTime(pAd, TRUE); //FALSE);
 	AsicSetEdcaParm(pAd, NULL);
 
+#ifdef LED_CONTROL_SUPPORT
 	// Set LED
 	RTMPSetLED(pAd, LED_LINK_DOWN);
     pAd->LedIndicatorStrength = 0xF0;
     RTMPSetSignalLED(pAd, -100);	// Force signal strength Led to be turned off, firmware is not done it.
+#endif // LED_CONTROL_SUPPORT //
 
 		AsicDisableSync(pAd);
 
 	pAd->Mlme.PeriodicRound = 0;
 	pAd->Mlme.OneSecPeriodicRound = 0;
 
-	if (pAd->StaCfg.BssType == BSS_INFRA)
-	{
-	// Remove StaCfg Information after link down
-	NdisZeroMemory(pAd->CommonCfg.Bssid, MAC_ADDR_LEN);
-	NdisZeroMemory(pAd->CommonCfg.Ssid, MAX_LEN_OF_SSID);
-		pAd->CommonCfg.SsidLen = 0;
-	}
 #ifdef DOT11_N_SUPPORT
 	NdisZeroMemory(&pAd->MlmeAux.HtCapability, sizeof(HT_CAPABILITY_IE));
 	NdisZeroMemory(&pAd->MlmeAux.AddHtInfo, sizeof(ADD_HT_INFO_IE));
 	pAd->MlmeAux.HtCapabilityLen = 0;
 	pAd->MlmeAux.NewExtChannelOffset = 0xff;
+
+	DBGPRINT(RT_DEBUG_TRACE, ("LinkDownCleanMlmeAux.ExtCapInfo!\n"));
+	NdisZeroMemory((PUCHAR)(&pAd->MlmeAux.ExtCapInfo), sizeof(EXT_CAP_INFO_ELEMENT));
 #endif // DOT11_N_SUPPORT //
 	
 	// Reset WPA-PSK state. Only reset when supplicant enabled
@@ -2195,12 +2338,7 @@ VOID LinkDown(
 	//
 	// Reset RSSI value after link down
 	//
-	pAd->StaCfg.RssiSample.AvgRssi0 = 0;
-	pAd->StaCfg.RssiSample.AvgRssi0X8 = 0;
-	pAd->StaCfg.RssiSample.AvgRssi1 = 0;
-	pAd->StaCfg.RssiSample.AvgRssi1X8 = 0;
-	pAd->StaCfg.RssiSample.AvgRssi2 = 0;
-	pAd->StaCfg.RssiSample.AvgRssi2X8 = 0;
+	NdisZeroMemory((PUCHAR)(&pAd->StaCfg.RssiSample), sizeof(pAd->StaCfg.RssiSample));
 
 	// Restore MlmeRate
 	pAd->CommonCfg.MlmeRate = pAd->CommonCfg.BasicMlmeRate;
@@ -2221,9 +2359,22 @@ VOID LinkDown(
 	// Reset DAC
 	RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R1, &ByteValue);
 	ByteValue &= (~0x18);
-	if (pAd->Antenna.field.TxPath == 2)
+
+#ifdef RT3593
+	if (IS_RT3593(pAd))
 	{
-	ByteValue |= 0x10;
+		if (pAd->Antenna.field.TxPath == 3)
+			ByteValue |= 0x10;
+		else if (pAd->Antenna.field.TxPath == 2)
+			ByteValue |= 0x08;		
+	}
+	else
+#endif // RT3593 //
+	{
+		if (pAd->Antenna.field.TxPath == 2)
+		{
+			ByteValue |= 0x10;
+		}
 	}
 	RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R1, ByteValue);
 
@@ -2236,7 +2387,9 @@ VOID LinkDown(
 
 	// Restore all settings in the following.
 	AsicUpdateProtect(pAd, 0, (ALLN_SETPROTECT|CCKSETPROTECT|OFDMSETPROTECT), TRUE, FALSE);
+#ifdef DOT11_N_SUPPORT
 	AsicDisableRDG(pAd);
+#endif // DOT11_N_SUPPORT //
 	pAd->CommonCfg.IOTestParm.bCurrentAtheros = FALSE;
 	pAd->CommonCfg.IOTestParm.bNowAtherosBurstOn = FALSE;
 				
@@ -2255,7 +2408,11 @@ VOID LinkDown(
 	RTMP_IO_WRITE32(pAd, MAX_LEN_CFG, 0x1fff);
 	RTMP_CLEAR_FLAG(pAd, fRTMP_ADAPTER_BSS_SCAN_IN_PROGRESS);
 // Allow go to sleep after linkdown steps.
+#ifdef  PCIE_PS_SUPPORT
+
 	RTMP_SET_PSFLAG(pAd, fRTMP_PS_CAN_GO_SLEEP);
+#endif // PCIE_PS_SUPPORT //
+
 #ifdef WPA_SUPPLICANT_SUPPORT
 #ifndef NATIVE_WPA_SUPPLICANT_SUPPORT
 	if (pAd->StaCfg.WpaSupplicantUP) {
@@ -2270,7 +2427,7 @@ VOID LinkDown(
 #endif // NATIVE_WPA_SUPPLICANT_SUPPORT //        
 
 #ifdef RT30xx
-	if ((IS_RT30xx(pAd) || IS_RT3090(pAd)||IS_RT3390(pAd)) 
+	if ((IS_RT3071(pAd) || IS_RT3572(pAd) || IS_RT3593(pAd)) 
 		&&(pAd->Antenna.field.RxPath>1||pAd->Antenna.field.TxPath>1))
 	{
 		RTMP_ASIC_MMPS_DISABLE(pAd);
@@ -2293,6 +2450,7 @@ VOID IterateOnBssTab(
 	MLME_START_REQ_STRUCT   StartReq;
 	MLME_JOIN_REQ_STRUCT    JoinReq;
 	ULONG                   BssIdx;
+	BSS_ENTRY 				*pInBss = NULL;
 
 	// Change the wepstatus to original wepstatus
 	pAd->StaCfg.WepStatus   = pAd->StaCfg.OrigWepStatus;
@@ -2300,35 +2458,60 @@ VOID IterateOnBssTab(
 	pAd->StaCfg.GroupCipher = pAd->StaCfg.OrigWepStatus;
 
 	BssIdx = pAd->MlmeAux.BssIdx;
-	if (BssIdx < pAd->MlmeAux.SsidBssTab.BssNr) 
+
+	if (pAd->StaCfg.BssType == BSS_ADHOC)
+	{		
+		if (BssIdx < pAd->MlmeAux.SsidBssTab.BssNr) 
+		{
+			pInBss = &pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx];
+			if ((pAd->StaCfg.AuthMode == pInBss->AuthMode) &&
+				(pAd->StaCfg.WepStatus == pInBss->WepStatus))
+			{
+				DBGPRINT(RT_DEBUG_TRACE, ("CNTL - iterate BSS %ld of %d\n", BssIdx, pAd->MlmeAux.SsidBssTab.BssNr));
+				JoinParmFill(pAd, &JoinReq, BssIdx);
+				MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_JOIN_REQ, sizeof(MLME_JOIN_REQ_STRUCT),
+							&JoinReq, 0);
+				pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_JOIN;
+				return;
+			}
+		}
+		DBGPRINT(RT_DEBUG_TRACE, ("CNTL - All BSS fail; start a new ADHOC (Ssid=%s)...\n",pAd->MlmeAux.Ssid));
+		StartParmFill(pAd, &StartReq, (PCHAR)pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen);
+		MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_START_REQ, sizeof(MLME_START_REQ_STRUCT), &StartReq, 0);
+		
+		pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_START;
+	}
+	else if ((BssIdx < pAd->MlmeAux.SsidBssTab.BssNr) &&
+			 (pAd->StaCfg.BssType == BSS_INFRA)) 
 	{
+		pInBss = &pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx];
 		// Check cipher suite, AP must have more secured cipher than station setting
 		// Set the Pairwise and Group cipher to match the intended AP setting
 		// We can only connect to AP with less secured cipher setting
 		if ((pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA) || (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPAPSK))
 		{
-			pAd->StaCfg.GroupCipher = pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA.GroupCipher;
+			pAd->StaCfg.GroupCipher = pInBss->WPA.GroupCipher;
 			
-			if (pAd->StaCfg.WepStatus == pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA.PairCipher)
-				pAd->StaCfg.PairCipher = pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA.PairCipher;
-			else if (pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA.PairCipherAux != Ndis802_11WEPDisabled)
-				pAd->StaCfg.PairCipher = pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA.PairCipherAux;
+			if (pAd->StaCfg.WepStatus == pInBss->WPA.PairCipher)
+				pAd->StaCfg.PairCipher = pInBss->WPA.PairCipher;
+			else if (pInBss->WPA.PairCipherAux != Ndis802_11WEPDisabled)
+				pAd->StaCfg.PairCipher = pInBss->WPA.PairCipherAux;
 			else	// There is no PairCipher Aux, downgrade our capability to TKIP
 				pAd->StaCfg.PairCipher = Ndis802_11Encryption2Enabled;			
 		}
 		else if ((pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2) || (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2PSK))
 		{
-			pAd->StaCfg.GroupCipher = pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA2.GroupCipher;
+			pAd->StaCfg.GroupCipher = pInBss->WPA2.GroupCipher;
 			
-			if (pAd->StaCfg.WepStatus == pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA2.PairCipher)
-				pAd->StaCfg.PairCipher = pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA2.PairCipher;
-			else if (pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA2.PairCipherAux != Ndis802_11WEPDisabled)
-				pAd->StaCfg.PairCipher = pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA2.PairCipherAux;
+			if (pAd->StaCfg.WepStatus == pInBss->WPA2.PairCipher)
+				pAd->StaCfg.PairCipher = pInBss->WPA2.PairCipher;
+			else if (pInBss->WPA2.PairCipherAux != Ndis802_11WEPDisabled)
+				pAd->StaCfg.PairCipher = pInBss->WPA2.PairCipherAux;
 			else	// There is no PairCipher Aux, downgrade our capability to TKIP
 				pAd->StaCfg.PairCipher = Ndis802_11Encryption2Enabled;			
 
 			// RSN capability
-			pAd->StaCfg.RsnCapability = pAd->MlmeAux.SsidBssTab.BssEntry[BssIdx].WPA2.RsnCapability;
+			pAd->StaCfg.RsnCapability = pInBss->WPA2.RsnCapability;
 		}
 		
 		// Set Mix cipher flag
@@ -2342,15 +2525,8 @@ VOID IterateOnBssTab(
 		DBGPRINT(RT_DEBUG_TRACE, ("CNTL - iterate BSS %ld of %d\n", BssIdx, pAd->MlmeAux.SsidBssTab.BssNr));
 		JoinParmFill(pAd, &JoinReq, BssIdx);
 		MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_JOIN_REQ, sizeof(MLME_JOIN_REQ_STRUCT),
-					&JoinReq);
+					&JoinReq, 0);
 		pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_JOIN;
-	}
-	else if (pAd->StaCfg.BssType == BSS_ADHOC)
-	{
-		DBGPRINT(RT_DEBUG_TRACE, ("CNTL - All BSS fail; start a new ADHOC (Ssid=%s)...\n",pAd->MlmeAux.Ssid));
-		StartParmFill(pAd, &StartReq, (PCHAR)pAd->MlmeAux.Ssid, pAd->MlmeAux.SsidLen);
-		MlmeEnqueue(pAd, SYNC_STATE_MACHINE, MT2_MLME_START_REQ, sizeof(MLME_START_REQ_STRUCT), &StartReq);
-		pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_START;
 	}
 	else // no more BSS
 	{
@@ -2390,7 +2566,7 @@ VOID IterateOnBssTab2(
 		AssocParmFill(pAd, &ReassocReq, pBss->Bssid, pBss->CapabilityInfo, 
 					  ASSOC_TIMEOUT, pAd->StaCfg.DefaultListenCount);
 		MlmeEnqueue(pAd, ASSOC_STATE_MACHINE, MT2_MLME_REASSOC_REQ, 
-					sizeof(MLME_REASSOC_REQ_STRUCT), &ReassocReq);
+					sizeof(MLME_REASSOC_REQ_STRUCT), &ReassocReq, 0);
 
 		pAd->Mlme.CntlMachine.CurrState = CNTL_WAIT_REASSOC;
 	}
@@ -2523,7 +2699,7 @@ VOID MlmeCntlConfirm(
 	IN ULONG MsgType, 
 	IN USHORT Msg) 
 {
-	MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MsgType, sizeof(USHORT), &Msg);
+	MlmeEnqueue(pAd, MLME_CNTL_STATE_MACHINE, MsgType, sizeof(USHORT), &Msg, 0);
 }
 
 VOID ComposePsPoll(
@@ -2605,7 +2781,6 @@ ULONG MakeIbssBeacon(
 	UCHAR         SupRateLen = 0;
 	UCHAR         ExtRate[MAX_LEN_OF_SUPPORTED_RATES];
 	UCHAR         ExtRateLen = 0;
-	UCHAR         RSNIe = IE_WPA;
 	
 	if ((pAd->CommonCfg.PhyMode == PHY_11B) && (pAd->CommonCfg.Channel <= 14))
 	{
@@ -2704,10 +2879,16 @@ ULONG MakeIbssBeacon(
 	}
 
 	// If adhoc secruity is set for WPA-None, append the cipher suite IE
-	if (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPANone)
+	// Modify by Eddy, support WPA2PSK in Adhoc mode
+	if ((pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPANone)
+        || (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2PSK))        
 	{
-		ULONG tmp;
+	    UCHAR   RSNIe = IE_WPA;
+		ULONG   tmp;
+
         RTMPMakeRSNIE(pAd, pAd->StaCfg.AuthMode, pAd->StaCfg.WepStatus, BSS0);
+    	if (pAd->StaCfg.AuthMode == Ndis802_11AuthModeWPA2PSK)
+            RSNIe = IE_RSN;            
         
 		MakeOutgoingFrame(pBeaconFrame + FrameLen,        	&tmp,
 						  1,                              	&RSNIe,
@@ -2717,8 +2898,10 @@ ULONG MakeIbssBeacon(
 		FrameLen += tmp;	
 	}
 
+
 #ifdef DOT11_N_SUPPORT
-	if ((pAd->CommonCfg.PhyMode >= PHY_11ABGN_MIXED))
+	if ((pAd->CommonCfg.PhyMode >= PHY_11ABGN_MIXED) &&
+		(pAd->CommonCfg.HT_Disable == 0))
 	{
 		ULONG TmpLen;
 		UCHAR HtLen, HtLen1;
@@ -2786,6 +2969,112 @@ ULONG MakeIbssBeacon(
     DBGPRINT(RT_DEBUG_TRACE, ("MakeIbssBeacon (len=%ld), SupRateLen=%d, ExtRateLen=%d, Channel=%d, PhyMode=%d\n", 
 					FrameLen, SupRateLen, ExtRateLen, pAd->CommonCfg.Channel, pAd->CommonCfg.PhyMode));
 	return FrameLen;
+}
+
+VOID InitChannelRelatedValue(
+	IN PRTMP_ADAPTER pAd)
+{
+	UCHAR	Value = 0;
+	UINT32	Data = 0;
+
+
+	pAd->CommonCfg.CentralChannel = pAd->MlmeAux.CentralChannel;
+	pAd->CommonCfg.Channel = pAd->MlmeAux.Channel;
+#ifdef DOT11_N_SUPPORT
+	// Change to AP channel
+    if ((pAd->CommonCfg.CentralChannel > pAd->CommonCfg.Channel) && (pAd->MlmeAux.HtCapability.HtCapInfo.ChannelWidth == BW_40))
+	{	
+		// Must using 40MHz.
+		pAd->CommonCfg.BBPCurrentBW = BW_40;
+		AsicSwitchChannel(pAd, pAd->CommonCfg.CentralChannel, FALSE);
+		AsicLockChannel(pAd, pAd->CommonCfg.CentralChannel);
+			
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &Value);
+		Value &= (~0x18);
+		Value |= 0x10;
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, Value);
+		
+		//  RX : control channel at lower 
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R3, &Value);
+		Value &= (~0x20);
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R3, Value);
+
+		RTMP_IO_READ32(pAd, TX_BAND_CFG, &Data);
+		Data &= 0xfffffffe;
+		RTMP_IO_WRITE32(pAd, TX_BAND_CFG, Data);
+		
+		if (pAd->MACVersion == 0x28600100)
+		{
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R69, 0x1A);
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R70, 0x0A);
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R73, 0x16);
+            DBGPRINT(RT_DEBUG_TRACE, ("!!!rt2860C !!! \n" ));
+		}	
+
+		DBGPRINT(RT_DEBUG_TRACE, ("!!!40MHz Lower !!! Control Channel at Below. Central = %d \n", pAd->CommonCfg.CentralChannel ));
+	}
+	else if ((pAd->CommonCfg.CentralChannel < pAd->CommonCfg.Channel) && (pAd->MlmeAux.HtCapability.HtCapInfo.ChannelWidth == BW_40))
+    {	
+	    // Must using 40MHz.
+		pAd->CommonCfg.BBPCurrentBW = BW_40;
+		AsicSwitchChannel(pAd, pAd->CommonCfg.CentralChannel, FALSE);
+	    AsicLockChannel(pAd, pAd->CommonCfg.CentralChannel);
+		
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &Value);
+		Value &= (~0x18);
+		Value |= 0x10;
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, Value);
+		
+		RTMP_IO_READ32(pAd, TX_BAND_CFG, &Data);
+		Data |= 0x1;
+		RTMP_IO_WRITE32(pAd, TX_BAND_CFG, Data);
+		
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R3, &Value);
+	    Value |= (0x20);
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R3, Value);
+	
+		if (pAd->MACVersion == 0x28600100)
+		{
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R69, 0x1A);
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R70, 0x0A);
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R73, 0x16);
+			    DBGPRINT(RT_DEBUG_TRACE, ("!!!rt2860C !!! \n" ));
+		}
+
+	    DBGPRINT(RT_DEBUG_TRACE, ("!!! 40MHz Upper !!! Control Channel at UpperCentral = %d \n", pAd->CommonCfg.CentralChannel ));
+    }
+    else
+#endif // DOT11_N_SUPPORT //
+    {
+	    pAd->CommonCfg.BBPCurrentBW = BW_20;
+		pAd->CommonCfg.CentralChannel = pAd->CommonCfg.Channel;
+		AsicSwitchChannel(pAd, pAd->CommonCfg.Channel, FALSE);
+		AsicLockChannel(pAd, pAd->CommonCfg.Channel);
+		
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R4, &Value);
+		Value &= (~0x18);
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R4, Value);
+		
+		RTMP_IO_READ32(pAd, TX_BAND_CFG, &Data);
+		Data &= 0xfffffffe;
+		RTMP_IO_WRITE32(pAd, TX_BAND_CFG, Data);
+		
+		RTMP_BBP_IO_READ8_BY_REG_ID(pAd, BBP_R3, &Value);
+		Value &= (~0x20);
+		RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R3, Value);
+		
+		if (pAd->MACVersion == 0x28600100)
+		{
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R69, 0x16);
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R70, 0x08);
+			RTMP_BBP_IO_WRITE8_BY_REG_ID(pAd, BBP_R73, 0x11);
+			DBGPRINT(RT_DEBUG_TRACE, ("!!!rt2860C !!! \n" ));
+		}
+		
+	    DBGPRINT(RT_DEBUG_TRACE, ("!!! 20MHz !!! \n" ));
+	}
+
+	RTMPSetAGCInitValue(pAd, pAd->CommonCfg.BBPCurrentBW);
 }
 
 

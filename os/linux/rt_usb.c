@@ -39,35 +39,6 @@
 #include "rt_config.h"
 
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)
- void dump_urb(struct urb* purb)
-{
-	printk("urb                  :0x%08lx\n", (unsigned long)purb);
-	printk("\tdev                   :0x%08lx\n", (unsigned long)purb->dev);
-	printk("\t\tdev->state          :0x%d\n", purb->dev->state);
-	printk("\tpipe                  :0x%08x\n", purb->pipe);
-	printk("\tstatus                :%d\n", purb->status);
-	printk("\ttransfer_flags        :0x%08x\n", purb->transfer_flags);
-	printk("\ttransfer_buffer       :0x%08lx\n", (unsigned long)purb->transfer_buffer);
-	printk("\ttransfer_buffer_length:%d\n", purb->transfer_buffer_length);
-	printk("\tactual_length         :%d\n", purb->actual_length);
-	printk("\tsetup_packet          :0x%08lx\n", (unsigned long)purb->setup_packet);
-	printk("\tstart_frame           :%d\n", purb->start_frame);
-	printk("\tnumber_of_packets     :%d\n", purb->number_of_packets);
-	printk("\tinterval              :%d\n", purb->interval);
-	printk("\terror_count           :%d\n", purb->error_count);
-	printk("\tcontext               :0x%08lx\n", (unsigned long)purb->context);
-	printk("\tcomplete              :0x%08lx\n\n", (unsigned long)purb->complete);
-}
-#else
-void dump_urb(struct urb* purb)
-{
-	return;
-}
-#endif
-
-
-
 /*
 ========================================================================
 Routine Description:
@@ -96,7 +67,7 @@ NDIS_STATUS	 RtmpMgmtTaskInit(
 
 	pTask = &pAd->timerTask;
 	RtmpOSTaskInit(pTask, "RtmpTimerTask", pAd);
-	status = RtmpOSTaskAttach(pTask, RtmpTimerQThread, pTask);
+	status = RtmpOSTaskAttach(pTask, RtmpTimerQThread, (ULONG)pTask);
 	if (status == NDIS_STATUS_FAILURE) 
 	{
 		printk (KERN_WARNING "%s: unable to start RtmpTimerQThread\n", RTMP_OS_NETDEV_GET_DEVNAME(pAd->net_dev));
@@ -106,7 +77,7 @@ NDIS_STATUS	 RtmpMgmtTaskInit(
 	/* Creat MLME Thread */
 	pTask = &pAd->mlmeTask;
 	RtmpOSTaskInit(pTask, "RtmpMlmeTask", pAd);
-	status = RtmpOSTaskAttach(pTask, MlmeThread, pTask);
+	status = RtmpOSTaskAttach(pTask, MlmeThread, (ULONG)pTask);
 	if (status == NDIS_STATUS_FAILURE) 
 	{
 		printk (KERN_WARNING "%s: unable to start MlmeThread\n", RTMP_OS_NETDEV_GET_DEVNAME(pAd->net_dev));
@@ -116,7 +87,7 @@ NDIS_STATUS	 RtmpMgmtTaskInit(
 	/* Creat Command Thread */
 	pTask = &pAd->cmdQTask;
 	RtmpOSTaskInit(pTask, "RtmpCmdQTask", pAd);
-	status = RtmpOSTaskAttach(pTask, RTUSBCmdThread, pTask);
+	status = RtmpOSTaskAttach(pTask, RTUSBCmdThread, (ULONG)pTask);
 	if (status == NDIS_STATUS_FAILURE) 
 	{
 		printk (KERN_WARNING "%s: unable to start RTUSBCmdThread\n", RTMP_OS_NETDEV_GET_DEVNAME(pAd->net_dev));
@@ -177,11 +148,10 @@ VOID RtmpMgmtTaskExit(
 	CHECK_PID_LEGALITY(pTask->taskPID)
 #endif
 	{
-		mb();
 		NdisAcquireSpinLock(&pAd->CmdQLock);
 		pAd->CmdQ.CmdQState = RTMP_TASK_STAT_STOPED;
 		NdisReleaseSpinLock(&pAd->CmdQLock);
-		mb();
+
 		//RTUSBCMDUp(pAd);
 		ret = RtmpOSTaskKill(pTask);
 		if (ret == NDIS_STATUS_FAILURE)
@@ -331,7 +301,7 @@ static void rtusb_null_frame_done_tasklet(unsigned long data)
 			RTMP_SET_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET);
 			pAd->bulkResetPipeid = (MGMTPIPEIDX | BULKOUT_MGMT_RESET_FLAG);
 			RTMP_IRQ_UNLOCK(&pAd->BulkOutLock[0], irqFlag);
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
 		}
 		else
 		{
@@ -380,7 +350,7 @@ static void rtusb_rts_frame_done_tasklet(unsigned long data)
 			RTMP_SET_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET);
 			pAd->bulkResetPipeid = (MGMTPIPEIDX | BULKOUT_MGMT_RESET_FLAG);
 			RTMP_IRQ_UNLOCK(&pAd->BulkOutLock[0], irqFlag);
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
 		}
 		else
 		{
@@ -433,7 +403,7 @@ static void rtusb_pspoll_frame_done_tasklet(unsigned long data)
 			DBGPRINT_RAW(RT_DEBUG_ERROR, ("Bulk Out PSPoll Failed\n"));
 			RTMP_SET_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET);
 			pAd->bulkResetPipeid = (MGMTPIPEIDX | BULKOUT_MGMT_RESET_FLAG);
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
 		}
 	}
 
@@ -512,7 +482,7 @@ static void rx_done_tasklet(unsigned long data)
 							Status, pAd->NextRxBulkInIndex, pAd->NextRxBulkInReadIndex, pRxContext->pUrb->actual_length));
 
 			RTMP_SET_FLAG(pAd, fRTMP_ADAPTER_BULKIN_RESET);
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_IN, NULL, 0);
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_IN, NULL, 0);
 		}
 	}
 	
@@ -592,6 +562,7 @@ static void rtusb_mgmt_dma_done_tasklet(unsigned long data)
 	pAd->MgmtRing.TxSwFreeIdx++;
 	RTMP_IRQ_UNLOCK(&pAd->MLMEBulkOutLock, IrqFlags);
 
+
 	// No-matter success or fail, we free the mgmt packet.
 	if (pPacket)
 		RTMPFreeNdisPacket(pAd, pPacket);
@@ -607,7 +578,7 @@ static void rtusb_mgmt_dma_done_tasklet(unsigned long data)
 		if (RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET) && 
 			((pAd->bulkResetPipeid & BULKOUT_MGMT_RESET_FLAG) == BULKOUT_MGMT_RESET_FLAG))
 		{	// For Mgmt Bulk-Out failed, ignore it now.
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);
 		}
 		else
 		{
@@ -623,9 +594,59 @@ static void rtusb_mgmt_dma_done_tasklet(unsigned long data)
 		}
 
 
+#ifdef CONFIG_STA_SUPPORT
+#endif // CONFIG_STA_SUPPORT //
 }
 
 
+static void rtusb_hcca_dma_done_tasklet(unsigned long data)
+{
+	PRTMP_ADAPTER		pAd;
+	PHT_TX_CONTEXT		pHTTXContext;
+	UCHAR				BulkOutPipeId = 4;
+	purbb_t				pUrb;
+
+	
+	DBGPRINT_RAW(RT_DEBUG_ERROR, ("--->hcca_dma_done_tasklet\n"));
+
+
+	pUrb			= (purbb_t)data;
+	pHTTXContext	= (PHT_TX_CONTEXT)pUrb->context;
+	pAd				= pHTTXContext->pAd;
+
+	rtusb_dataout_complete((unsigned long)pUrb);
+
+	if ((RTMP_TEST_FLAG(pAd, (fRTMP_ADAPTER_RESET_IN_PROGRESS | 
+								fRTMP_ADAPTER_HALT_IN_PROGRESS | 
+								fRTMP_ADAPTER_NIC_NOT_EXIST)))) 
+	{
+		// do nothing and return directly.
+	}
+	else 
+	{	
+		if (RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET))
+		{
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
+		}
+		else
+		{	pHTTXContext = &pAd->TxContext[BulkOutPipeId];
+			if ((pAd->TxSwQueue[BulkOutPipeId].Number > 0) && 
+				/*((pHTTXContext->CurWritePosition > (pHTTXContext->NextBulkOutPosition + 0x6000)) || (pHTTXContext->NextBulkOutPosition > pHTTXContext->CurWritePosition + 0x6000)) && */
+				(pAd->DeQueueRunning[BulkOutPipeId] == FALSE) && 
+				(pHTTXContext->bCurWriting == FALSE))
+			{
+				RTMPDeQueuePacket(pAd, FALSE, BulkOutPipeId, MAX_TX_PROCESS);
+			}
+			
+			RTUSB_SET_BULK_FLAG(pAd, fRTUSB_BULK_OUT_DATA_NORMAL);
+			RTUSBKickBulkOut(pAd);
+		}
+	}
+	
+	DBGPRINT_RAW(RT_DEBUG_ERROR, ("<---hcca_dma_done_tasklet\n"));
+
+		return;
+}
 
 
 static void rtusb_ac3_dma_done_tasklet(unsigned long data)
@@ -652,7 +673,7 @@ static void rtusb_ac3_dma_done_tasklet(unsigned long data)
 	{	
 		if (RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET))
 		{
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
 		}
 		else
 		{	pHTTXContext = &pAd->TxContext[BulkOutPipeId];
@@ -698,7 +719,7 @@ static void rtusb_ac2_dma_done_tasklet(unsigned long data)
 	{	
 		if (RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET))
 		{
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
 		}
 		else
 		{	pHTTXContext = &pAd->TxContext[BulkOutPipeId];
@@ -744,7 +765,7 @@ static void rtusb_ac1_dma_done_tasklet(unsigned long data)
 	{	
 		if (RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET))
 		{
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
 		}
 		else
 		{	pHTTXContext = &pAd->TxContext[BulkOutPipeId];
@@ -789,7 +810,7 @@ static void rtusb_ac0_dma_done_tasklet(unsigned long data)
 	{	
 		if (RTMP_TEST_FLAG(pAd, fRTMP_ADAPTER_BULKOUT_RESET))
 		{
-			RTUSBEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
+			RTEnqueueInternalCmd(pAd, CMDTHREAD_RESET_BULK_OUT, NULL, 0);	
 		}
 		else
 		{	pHTTXContext = &pAd->TxContext[BulkOutPipeId];
@@ -824,6 +845,7 @@ NDIS_STATUS RtmpNetTaskInit(
 	tasklet_init(&pObj->ac1_dma_done_task, rtusb_ac1_dma_done_tasklet, (unsigned long)pAd);
 	tasklet_init(&pObj->ac2_dma_done_task, rtusb_ac2_dma_done_tasklet, (unsigned long)pAd);
 	tasklet_init(&pObj->ac3_dma_done_task, rtusb_ac3_dma_done_tasklet, (unsigned long)pAd);
+	tasklet_init(&pObj->hcca_dma_done_task, rtusb_hcca_dma_done_tasklet, (unsigned long)pAd);
 	tasklet_init(&pObj->tbtt_task, tbtt_tasklet, (unsigned long)pAd);
 	tasklet_init(&pObj->null_frame_complete_task, rtusb_null_frame_done_tasklet, (unsigned long)pAd);
 	tasklet_init(&pObj->rts_frame_complete_task, rtusb_rts_frame_done_tasklet, (unsigned long)pAd);
@@ -845,6 +867,7 @@ void RtmpNetTaskExit(IN RTMP_ADAPTER *pAd)
 	tasklet_kill(&pObj->ac1_dma_done_task);
 	tasklet_kill(&pObj->ac2_dma_done_task);
 	tasklet_kill(&pObj->ac3_dma_done_task);
+	tasklet_kill(&pObj->hcca_dma_done_task);
 	tasklet_kill(&pObj->tbtt_task);
 	tasklet_kill(&pObj->null_frame_complete_task);
 	tasklet_kill(&pObj->rts_frame_complete_task);

@@ -38,10 +38,10 @@
 #define __RT30XX_H__
 
 #ifdef RT30xx
+#include "rtmp_type.h"
 
-
-extern REG_PAIR RT30xx_RFRegTable[];
-extern UCHAR NUM_RF_REG_PARMS;
+extern REG_PAIR RT3020_RFRegTable[];
+extern UCHAR NUM_RF_3020_REG_PARMS;
 
 #endif // RT30xx //
 

@@ -453,7 +453,7 @@ NDIS_STATUS	RTMPAllocTxRxRingMemory(
 		// Init the CmdQ and CmdQLock
 		NdisAllocateSpinLock(&pAd->CmdQLock);	
 		NdisAcquireSpinLock(&pAd->CmdQLock);
-		RTUSBInitializeCmdQ(&pAd->CmdQ);
+		RTInitializeCmdQ(&pAd->CmdQ);
 		NdisReleaseSpinLock(&pAd->CmdQLock);
 
 
@@ -681,15 +681,6 @@ NDIS_STATUS	RTUSBWriteHWMACAddress(
 	// initialize the random number generator
 	RTMP_GetCurrentSystemTime(&NOW);
 	
-	if (pAd->bLocalAdminMAC != TRUE)
-	{
-		pAd->CurrentAddress[0] = pAd->PermanentAddress[0];
-		pAd->CurrentAddress[1] = pAd->PermanentAddress[1];
-		pAd->CurrentAddress[2] = pAd->PermanentAddress[2];
-		pAd->CurrentAddress[3] = pAd->PermanentAddress[3];
-		pAd->CurrentAddress[4] = pAd->PermanentAddress[4];
-		pAd->CurrentAddress[5] = pAd->PermanentAddress[5];
-	}
 	// Write New MAC address to MAC_CSR2 & MAC_CSR3 & let ASIC know our new MAC
 	StaMacReg0.field.Byte0 = pAd->CurrentAddress[0];
 	StaMacReg0.field.Byte1 = pAd->CurrentAddress[1];
@@ -834,9 +825,6 @@ VOID RT28xx_UpdateBeaconToAsic(
 		return;
 	}
 	
-	//if ((pAd->WdsTab.Mode == WDS_BRIDGE_MODE) || 
-	//	((pAd->ApCfg.MBSSID[apidx].MSSIDDev == NULL) || !(pAd->ApCfg.MBSSID[apidx].MSSIDDev->flags & IFF_UP))
-	//	)
 	if (bBcnReq == FALSE)
 	{
 		/* when the ra interface is down, do not send its beacon frame */
@@ -1076,6 +1064,44 @@ VOID BeaconUpdateExec(
 	RTMP_IO_READ32(pAd, TSF_TIMER_DW1, &tsfTime_a.u.HighPart);
 	
 
+	/*
+		Calculate next beacon time to wake up to update.
+
+		BeaconRemain = (0xffffffff % (pAd->CommonCfg.BeaconPeriod << 10)) + 1;
+
+		Background: Timestamp (us) % Beacon Period (us) shall be 0 at TBTT
+
+		Formula:	(a+b) mod m = ((a mod m) + (b mod m)) mod m 
+					(a*b) mod m = ((a mod m) * (b mod m)) mod m 
+
+		==> ((HighPart * 0xFFFFFFFF) + LowPart) mod Beacon_Period
+		==> (((HighPart * 0xFFFFFFFF) mod Beacon_Period) +
+			(LowPart mod (Beacon_Period))) mod Beacon_Period
+		==> ((HighPart mod Beacon_Period) * (0xFFFFFFFF mod Beacon_Period)) mod
+			Beacon_Period
+
+		Steps:
+		1. Calculate the delta time between now and next TBTT;
+
+			delta time = (Beacon Period) - ((64-bit timestamp) % (Beacon Period))
+
+			(1) If no overflow for LowPart, 32-bit, we can calcualte the delta
+				time by using LowPart;
+
+				delta time = LowPart % (Beacon Period)
+
+			(2) If overflow for LowPart, we need to care about HighPart value;
+
+				delta time = (BeaconRemain * HighPart + LowPart) % (Beacon Period)
+
+				Ex: if the maximum value is 0x00 0xFF (255), Beacon Period = 100,
+					TBTT timestamp will be 100, 200, 300, 400, ...
+					when TBTT timestamp is 300 = 1*56 + 44, means HighPart = 1,
+					Low Part = 44
+
+		2. Adjust next update time of the timer to (delta time + 10ms).
+	*/
+
 	//positive=getDeltaTime(tsfTime_a, expectedTime, &deltaTime_exp);
 	period2US = (pAd->CommonCfg.BeaconPeriod << 10);
 	remain_high = pAd->CommonCfg.BeaconRemain * tsfTime_a.u.HighPart;
@@ -1136,8 +1162,10 @@ VOID RT28xxUsbMlmeRadioOn(
 		RTUSBBulkReceive(pAd);
 #endif // CONFIG_STA_SUPPORT //
 
+#ifdef LED_CONTROL_SUPPORT
 	// Set LED
 	RTMPSetLED(pAd, LED_RADIO_ON);
+#endif // LED_CONTROL_SUPPORT //
 }
 
 
@@ -1202,8 +1230,10 @@ VOID RT28xxUsbMlmeRadioOFF(
 	}
 #endif // CONFIG_STA_SUPPORT //
 
+#ifdef LED_CONTROL_SUPPORT
 	// Set LED
 	RTMPSetLED(pAd, LED_RADIO_OFF);
+#endif // LED_CONTROL_SUPPORT //
 
 
 	if (pAd->CommonCfg.BBPCurrentBW == BW_40)

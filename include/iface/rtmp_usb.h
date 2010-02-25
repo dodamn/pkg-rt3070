@@ -28,25 +28,14 @@
 #ifndef __RTMP_USB_H__
 #define __RTMP_USB_H__
 
-
 #include "rtusb_io.h"
-
-
-#ifdef LINUX
-#include <linux/usb.h>
-
-typedef struct usb_device	* PUSB_DEV;
-typedef struct urb *purbb_t;
-typedef struct usb_ctrlrequest devctrlrequest;
-#endif // LINUX //
 
 extern UCHAR EpToQueue[6];
 
-
-#define RXBULKAGGRE_ZISE			12
-#define MAX_TXBULK_LIMIT			(LOCAL_TXBUF_SIZE*(BULKAGGRE_ZISE-1))
-#define MAX_TXBULK_SIZE			(LOCAL_TXBUF_SIZE*BULKAGGRE_ZISE)
-#define MAX_RXBULK_SIZE			(LOCAL_TXBUF_SIZE*RXBULKAGGRE_ZISE)
+#define RXBULKAGGRE_SIZE			12
+#define MAX_TXBULK_LIMIT			(LOCAL_TXBUF_SIZE*(BULKAGGRE_SIZE-1))
+#define MAX_TXBULK_SIZE			(LOCAL_TXBUF_SIZE*BULKAGGRE_SIZE)
+#define MAX_RXBULK_SIZE			(LOCAL_TXBUF_SIZE*RXBULKAGGRE_SIZE)
 #define MAX_MLME_HANDLER_MEMORY 20
 
 
@@ -82,62 +71,6 @@ extern UCHAR EpToQueue[6];
 	/*NdisInterlockedDecrement(&(_p)->TxCount); */\
 }
 
-
-
-/******************************************************************************
-
-  	USB Bulk operation related definitions
-
-******************************************************************************/
-
-#ifdef LINUX
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-#define BULKAGGRE_ZISE          100
-#define RT28XX_PUT_DEVICE							usb_put_dev
-#define RTUSB_ALLOC_URB(iso)							usb_alloc_urb(iso, GFP_ATOMIC)
-#define RTUSB_SUBMIT_URB(pUrb)							usb_submit_urb(pUrb, GFP_ATOMIC)
-#define RTUSB_URB_ALLOC_BUFFER(pUsb_Dev, BufSize, pDma_addr)			usb_buffer_alloc(pUsb_Dev, BufSize, GFP_ATOMIC, pDma_addr)
-#define RTUSB_URB_FREE_BUFFER(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)	usb_buffer_free(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)
-#else
-#define BULKAGGRE_ZISE          60
-#define RT28XX_PUT_DEVICE(dev_p)
-#define RTUSB_ALLOC_URB(iso)                                               usb_alloc_urb(iso)
-#define RTUSB_SUBMIT_URB(pUrb)                                             usb_submit_urb(pUrb)
-#define RTUSB_URB_ALLOC_BUFFER(pUsb_Dev, BufSize, pDma_addr)               kmalloc(BufSize, GFP_ATOMIC)
-#define RTUSB_URB_FREE_BUFFER(pUsb_Dev, BufSize, pTransferBuf, Dma_addr)   kfree(pTransferBuf)
-#endif
-
-#define RTUSB_FREE_URB(pUrb)	usb_free_urb(pUrb)
-
-// unlink urb
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,7)
-#define RTUSB_UNLINK_URB(pUrb)		usb_kill_urb(pUrb)
-#else
-#define RTUSB_UNLINK_URB(pUrb)		usb_unlink_urb(pUrb)
-#endif
-
-// Prototypes of completion funuc.
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
-#define RTUSBBulkOutDataPacketComplete(purb, pt_regs)    RTUSBBulkOutDataPacketComplete(purb)
-#define RTUSBBulkOutMLMEPacketComplete(pUrb, pt_regs)    RTUSBBulkOutMLMEPacketComplete(pUrb)
-#define RTUSBBulkOutNullFrameComplete(pUrb, pt_regs)     RTUSBBulkOutNullFrameComplete(pUrb)
-#define RTUSBBulkOutRTSFrameComplete(pUrb, pt_regs)      RTUSBBulkOutRTSFrameComplete(pUrb)
-#define RTUSBBulkOutPsPollComplete(pUrb, pt_regs)        RTUSBBulkOutPsPollComplete(pUrb)
-#define RTUSBBulkRxComplete(pUrb, pt_regs)               RTUSBBulkRxComplete(pUrb)
-#endif // end of "#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)" //
-
-extern void dump_urb(struct urb* purb);
-
-#define InterlockedIncrement 	 	atomic_inc
-#define NdisInterlockedIncrement 	atomic_inc
-#define InterlockedDecrement		atomic_dec
-#define NdisInterlockedDecrement 	atomic_dec
-#define InterlockedExchange		atomic_set
-
-#endif // LINUX //
-
-
-
 #define NT_SUCCESS(status)			(((status) >=0) ? (TRUE):(FALSE))
 
 
@@ -148,23 +81,15 @@ extern void dump_urb(struct urb* purb);
 #define PURB			purbb_t
 
 #define PIRP		PVOID
-#define NDIS_OID	UINT
+//#define NDIS_OID	UINT
 #ifndef USB_ST_NOERROR
 #define USB_ST_NOERROR     0
 #endif
 
+
 // vendor-specific control operations
-#define CONTROL_TIMEOUT_JIFFIES ( (100 * OS_HZ) / 1000)
+#define CONTROL_TIMEOUT_JIFFIES ( (300 * OS_HZ) / 1000)
 #define UNLINK_TIMEOUT_MS		3
-
-
-VOID RTUSBBulkOutDataPacketComplete(purbb_t purb, struct pt_regs *pt_regs);
-VOID RTUSBBulkOutMLMEPacketComplete(purbb_t pUrb, struct pt_regs *pt_regs);
-VOID RTUSBBulkOutNullFrameComplete(purbb_t pUrb, struct pt_regs *pt_regs);
-VOID RTUSBBulkOutRTSFrameComplete(purbb_t pUrb, struct pt_regs *pt_regs);
-VOID RTUSBBulkOutPsPollComplete(purbb_t pUrb, struct pt_regs *pt_regs);
-VOID RTUSBBulkRxComplete(purbb_t pUrb, struct pt_regs *pt_regs);
-
 
 #ifdef KTHREAD_SUPPORT
 #define RTUSBMlmeUp(pAd) \
@@ -183,9 +108,10 @@ VOID RTUSBBulkRxComplete(purbb_t pUrb, struct pt_regs *pt_regs);
 		CHECK_PID_LEGALITY(_pTask->taskPID)		    \
 		{ \
 			RTMP_SEM_EVENT_UP(&(_pTask->taskSema)); \
-		}\
+		}	\
 	}while(0)
 #endif
+
 
 #ifdef KTHREAD_SUPPORT
 #define RTUSBCMDUp(pAd) \
@@ -202,11 +128,12 @@ VOID RTUSBBulkRxComplete(purbb_t pUrb, struct pt_regs *pt_regs);
 	do{									    \
 		RTMP_OS_TASK	*_pTask = &((pAd)->cmdQTask);	\
 		CHECK_PID_LEGALITY(_pTask->taskPID)	    \
-		{\
+		{	\
 			RTMP_SEM_EVENT_UP(&(_pTask->taskSema)); \
-		}\
+		}	\
 	}while(0)
 #endif
+
 
 #define DEVICE_VENDOR_REQUEST_OUT       0x40
 #define DEVICE_VENDOR_REQUEST_IN        0xc0
@@ -218,9 +145,5 @@ VOID RTUSBBulkRxComplete(purbb_t pUrb, struct pt_regs *pt_regs);
 #define RTUSB_SET_BULK_FLAG(_M, _F)	((_M)->BulkFlags |= (_F))
 #define RTUSB_CLEAR_BULK_FLAG(_M, _F)	((_M)->BulkFlags &= ~(_F))
 #define RTUSB_TEST_BULK_FLAG(_M, _F)	(((_M)->BulkFlags & (_F)) != 0)
-
-#define RTMP_IRQ_REQUEST(net_dev)		do{}while(0)
-#define RTMP_IRQ_RELEASE(net_dev)		do{}while(0)
-
 
 #endif // __RTMP_USB_H__ //

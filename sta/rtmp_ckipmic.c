@@ -28,11 +28,11 @@
 	rtmp_ckipmic.c
 
 	Abstract:
-	Data path subroutines
 
 	Revision History:
-	Who 		When			What
+	Who			When			What
 	--------	----------		----------------------------------------------
+	Name		Date			Modification logs
 */
 #include "rt_config.h"
 #include "rtmp_ckipmic.h"
