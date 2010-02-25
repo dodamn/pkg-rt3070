@@ -1,3 +1,38 @@
+rt3070 (2.3.0.1-0ubuntu1~ppa1~karmic1) karmic; urgency=low
+
+  * New upstream version
+    - Fix Shared WEP security mode can't work on wpa_supplicant wext driver.
+    - Fix Hidden SSID can't work on wpa_supplicant wext driver.
+    - Fix AdHoc mode can't work on wpa_supplicant wext driver.
+    - The following changes are from 2.3.0.0
+      - Support PSP XLINK in ad-hoc mode.
+      - Add mac80211 iw utility other commands support.
+      - Fix issue: The start address of HeaderBuf must be aligned by 4 when
+        VENDOR_FEATURE1_SUPPORT is enabled.
+      - WMM ACM: see history of acm_comm.c.
+      - Support WpaSupplicant(v0.6.9) WPS.
+      - Fix WPS issue: Check SelectRegistrar is TRUE or FALSE.
+      - Fix WPS issue: Some AP (ex. Buffalo WZR-AG300NH) would change SSID to 
+        another SSID after push WPS PBC button. After WPS process finish, 
+        change SSID to original SSID. Driver needs to wait AP to
+        re-generate Beacon; otherwise, driver will update this PBC SSID to
+        MlmeAux.
+      - Shorten the waiting time when unplug the device.
+      - Fix mgmt ring full issue: It happened only in big-endian platform and 
+        quickly switch the network type between Infra and Adhoc mode.
+      - Fix statistics issue: It happened in big-endian platform,
+        tx count would be zero.
+      - Support WiFi Draft_3.0 11n test items.
+      - Support Linux Kernel 2.6.31.
+      - Support Ad-hoc WPS2PSK/AES (DPO doesn't support this item).
+      - Support Samsung Auto Provision (only for Samsung Project).
+      - For GPL issue: Separate three kernel modules - util module,
+        driver module, netif module. util module and netif module could
+        license GPL. Driver module couldn't license GPL.
+      - Support CFG80211 of Linux Kernel 2.6.32.
+
+ -- dodamn <dodamn@gmail.com>  Thu, 25 Feb 2010 16:17:49 +0900
+
 rt3070 (2.1.2.0-0ubuntu1~ppa1~karmic1) karmic; urgency=low
 
   * Set this module to the first order for loading
