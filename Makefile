@@ -205,7 +205,7 @@ PHONY += all build_tools test UCOS THREADX LINUX release prerelease clean uninst
 ifeq ($(TARGET),THREADX)
 all: $(TARGET)
 else
-all: build_tools $(TARGET)
+all: $(TARGET)
 endif 
 
 
