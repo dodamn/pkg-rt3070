@@ -55,13 +55,9 @@ module_param (mac, charp, 0);
 #endif
 MODULE_PARM_DESC (mac, "rt28xx: wireless mac addr");
 
-#ifdef OS_ABL_SUPPORT
 #ifdef RTMP_MAC_USB
 MODULE_LICENSE("GPL");
 #endif // RTMP_MAC_USB //
-
-UCHAR ZERO_MAC_ADDR[MAC_ADDR_LEN]  = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-#endif // OS_ABL_SUPPORT //
 
 
 /*---------------------------------------------------------------------*/

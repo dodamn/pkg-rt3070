@@ -30,9 +30,7 @@
 ULONG	RTDebugLevel = RT_DEBUG_ERROR;
 
 #ifdef RTMP_MAC_USB
-#ifdef OS_ABL_SUPPORT
 MODULE_LICENSE("GPL");
-#endif // OS_ABL_SUPPORT //
 #endif // RTMP_MAC_USB //
 
 #ifdef SYSTEM_LOG_SUPPORT
