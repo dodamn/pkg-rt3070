@@ -1,3 +1,9 @@
+rt3070 (2.3.0.1-0ubuntu1~ppa3~karmic1) karmic; urgency=low
+
+  * Remove code that makes the kernel to load this module the first order.
+
+ -- dodamn <dodamn@gmail.com>  Fri, 12 Mar 2010 23:33:17 +0900
+
 rt3070 (2.3.0.1-0ubuntu1~ppa2~karmic1) karmic; urgency=low
 
   * Fix the kernel can't load the module.
